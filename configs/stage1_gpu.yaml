@@ -1,0 +1,31 @@
+data_config: configs/data.yaml
+experiment_config: configs/experiments.yaml
+panel_file: data/features/grid_month_panel.parquet
+neighbors_file: data/features/neighbors.parquet
+poi_dir: data/features/poi_sparse
+split_dir: data/splits
+artifact_dir: artifacts
+seed: 42
+device: auto
+models:
+  - lightgbm
+  - bpnn
+  - carbongcn
+  - opencarbon_core
+  - opencarbon_monthly
+  - opencarbon_monthly_noviirs
+training:
+  representation_dim: 128
+  dropout: 0.2
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  max_epochs: 25
+  contrastive_warmup_epochs: 2
+  contrastive_weight: 0.1
+  patience: 5
+  batch_size: 16
+  gradient_accumulation: 2
+  amp: true
+  num_workers: 2
+  temperature: 0.07
+

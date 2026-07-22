@@ -1,0 +1,13 @@
+raw_root: raw_data
+mapping_file: data/processed/admin_grid_mapping.csv
+feature_dir: data/features
+poi_size: 256
+expected_rows: 142992
+poi_verification:
+  max_absolute_difference: 1
+  max_discrepant_count_fraction: 0.003
+cities:
+  chicago: Chicago
+  nyc: NYC
+  singapore: singapore
+  tokyo: Tokyo

@@ -1,0 +1,32 @@
+# Raw and generated datasets
+/raw_data/
+/data/
+
+# Experiment outputs and reports
+/artifacts/
+/artifacts_smoke/
+/reports/
+/dist/
+*.log
+
+# Python caches and environments
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# IDE and OS files
+/.idea/
+/.agents/
+.DS_Store
+Thumbs.db
+
+# Local secrets
+.env
+.env.*
+*.pem
+*.key

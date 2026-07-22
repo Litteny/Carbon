@@ -1,0 +1,15 @@
+numpy==1.26.4
+pandas==2.2.3
+pyarrow==17.0.0
+scipy==1.13.1
+scikit-learn==1.5.2
+lightgbm==4.5.0
+torch==2.7.1
+PyYAML==6.0.2
+joblib==1.4.2
+tqdm==4.67.1
+geopandas==0.14.4
+shapely==2.0.6
+pyogrio==0.10.0
+tabulate==0.9.0
+pytest==8.3.3

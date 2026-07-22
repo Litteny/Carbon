@@ -1,0 +1,11 @@
+panel_file: data/features/grid_month_panel.parquet
+split_dir: data/splits
+split_seed: 2026
+validation_fraction: 0.2
+cross_city_targets: [chicago, nyc, singapore, tokyo]
+cross_region_pilots:
+  chicago: "02"
+  nyc: "303"
+  singapore: "PN"
+  tokyo: "13103"
+
