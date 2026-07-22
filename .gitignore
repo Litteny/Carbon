@@ -7,6 +7,7 @@
 /artifacts_smoke/
 /reports/
 /dist/
+/.tools/
 *.log
 
 # Python caches and environments
