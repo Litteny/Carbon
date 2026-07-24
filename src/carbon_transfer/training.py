@@ -24,7 +24,7 @@ from .constants import (
     MISSING_COLUMNS, MODEL_NAMES, MODIS_COLUMNS, MONTH_COLUMNS, POI_COLUMNS,
     TABULAR_FEATURES, VIIRS_COLUMNS, WEATHER_COLUMNS,
 )
-from .datasets import OpenCarbonDataset, neighbor_means, normalized_adjacency
+from .datasets import OpenCarbonDataset, fixed_neighborhood_indices, normalized_adjacency
 from .metrics import calculate_metrics, prediction_frame
 from .models import BPNN, CarbonGCN, OpenCarbonModel, contrastive_loss
 from .utils import resolve_device, set_seed, sha256_file, write_json
@@ -280,20 +280,21 @@ def _train_open_carbon(
     remote_size = len(remote_columns)
     datasets = {}
     for name, values in transformed.items():
-        neighbor = neighbor_means(values, frames[name], neighbors)
+        neighborhoods = fixed_neighborhood_indices(frames[name], neighbors)
         datasets[name] = OpenCarbonDataset(
-            frames[name], values[:, :remote_size], values[:, remote_size:], neighbor,
+            frames[name], values[:, :remote_size], values[:, remote_size:], neighborhoods,
             project_path(config["poi_dir"]),
         )
     loaders = {
         name: DataLoader(
             dataset, batch_size=int(settings["batch_size"]), shuffle=name == "train",
             num_workers=int(settings.get("num_workers", 0)), pin_memory=device.type == "cuda",
+            collate_fn=dataset.collate,
         )
         for name, dataset in datasets.items()
     }
     model = OpenCarbonModel(
-        remote_size, len(environment_columns), len(feature_columns),
+        remote_size, len(environment_columns),
         int(settings["representation_dim"]), float(settings["dropout"]),
     ).to(device)
     optimizer = torch.optim.AdamW(
@@ -322,7 +323,8 @@ def _train_open_carbon(
             batch = {key: value.to(device, non_blocking=True) for key, value in batch.items()}
             with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
                 prediction, poi_representation, remote_representation = model(
-                    batch["poi"], batch["remote"], batch["environment"], batch["neighbor"],
+                    batch["poi"], batch["remote"], batch["environment"],
+                    batch["neighborhood_indices"], batch["neighborhood_mask"],
                 )
                 regression = torch.mean(torch.abs(prediction - batch["target"]))
                 if epoch >= int(settings["contrastive_warmup_epochs"]) and len(prediction) > 1:
@@ -347,7 +349,10 @@ def _train_open_carbon(
             for batch in loaders["validation"]:
                 batch = {key: value.to(device, non_blocking=True) for key, value in batch.items()}
                 with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
-                    prediction, _, _ = model(batch["poi"], batch["remote"], batch["environment"], batch["neighbor"])
+                    prediction, _, _ = model(
+                        batch["poi"], batch["remote"], batch["environment"],
+                        batch["neighborhood_indices"], batch["neighborhood_mask"],
+                    )
                 validation_losses.append(float(torch.mean(torch.abs(prediction - batch["target"])).cpu()))
         validation_loss = float(np.mean(validation_losses))
         entry = {
@@ -378,7 +383,10 @@ def _train_open_carbon(
         for batch in loaders["test"]:
             batch = {key: value.to(device, non_blocking=True) for key, value in batch.items()}
             with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
-                prediction, _, _ = model(batch["poi"], batch["remote"], batch["environment"], batch["neighbor"])
+                prediction, _, _ = model(
+                    batch["poi"], batch["remote"], batch["environment"],
+                    batch["neighborhood_indices"], batch["neighborhood_mask"],
+                )
             predictions.append(prediction.float().cpu().numpy())
     return np.concatenate(predictions)
 

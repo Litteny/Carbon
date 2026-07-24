@@ -36,4 +36,3 @@ MODEL_NAMES = [
     "lightgbm", "bpnn", "carbongcn", "opencarbon_core",
     "opencarbon_monthly", "opencarbon_monthly_noviirs",
 ]
-

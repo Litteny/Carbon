@@ -1,0 +1,136 @@
+from __future__ import annotations
+
+from typing import Tuple
+
+import torch
+from torch import nn
+from torch.nn import functional as F
+
+from .common import MLPEncoder, ModalityAttention
+
+
+class SEModule(nn.Module):
+    def __init__(self, channels: int, reduction: int = 16) -> None:
+        super().__init__()
+        hidden = max(channels // reduction, 8)
+        self.fc1 = nn.Conv2d(channels, hidden, kernel_size=1)
+        self.fc2 = nn.Conv2d(hidden, channels, kernel_size=1)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        weights = inputs.mean((2, 3), keepdim=True)
+        weights = F.relu(self.fc1(weights), inplace=True)
+        weights = torch.sigmoid(self.fc2(weights))
+        return inputs * weights
+
+
+class POIEncoder(nn.Module):
+    """OpenCarbon POI encoder adapted from its 17-channel London-style branch."""
+
+    def __init__(self, channels: int = 17, representation_dim: int = 128, use_se: bool = True) -> None:
+        super().__init__()
+        self.conv1 = nn.Conv2d(channels, 32, kernel_size=7, stride=3, padding=3, bias=False)
+        self.bn1 = nn.BatchNorm2d(32)
+        self.conv2 = nn.Conv2d(32, 32, kernel_size=7, stride=3, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm2d(32)
+        self.conv3 = nn.Conv2d(32, 1, kernel_size=3, stride=3, padding=1, bias=False)
+        self.se1 = SEModule(32) if use_se else nn.Identity()
+        self.se2 = SEModule(32) if use_se else nn.Identity()
+        self.output = nn.Linear(100, representation_dim)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        hidden = self.se1(F.relu(self.bn1(self.conv1(inputs)), inplace=True))
+        hidden = self.se2(F.relu(self.bn2(self.conv2(hidden)), inplace=True))
+        hidden = self.conv3(hidden).flatten(1)
+        return self.output(hidden)
+
+
+class NeighborhoodAggregator(nn.Module):
+    """Encode a fixed 3x3 fused-representation neighborhood with an explicit mask."""
+
+    def __init__(self, representation_dim: int, dropout: float) -> None:
+        super().__init__()
+        attention_heads = 4 if representation_dim % 4 == 0 else 1
+        self.spatial_encoder = nn.Sequential(
+            nn.Conv2d(representation_dim + 1, representation_dim, kernel_size=3),
+            nn.ReLU(), nn.Dropout(dropout),
+        )
+        self.cross_attention = nn.MultiheadAttention(
+            representation_dim, attention_heads, dropout=dropout, batch_first=True,
+        )
+        self.output = nn.Sequential(
+            nn.Linear(representation_dim * 2, representation_dim),
+            nn.ReLU(), nn.Dropout(dropout),
+        )
+        self.norm = nn.LayerNorm(representation_dim)
+
+    def forward(
+        self,
+        fused_nodes: torch.Tensor,
+        neighborhood_indices: torch.Tensor,
+        neighborhood_mask: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        if neighborhood_indices.ndim != 2 or neighborhood_indices.shape[1] != 9:
+            raise ValueError("neighborhood_indices must have shape [batch, 9]")
+        if neighborhood_mask.shape != neighborhood_indices.shape:
+            raise ValueError("neighborhood_mask must match neighborhood_indices")
+        mask = neighborhood_mask.to(dtype=torch.bool)
+        if not torch.all(mask[:, 4]):
+            raise ValueError("Every 3x3 neighborhood must contain its center node")
+
+        gathered = fused_nodes[neighborhood_indices]
+        gathered = gathered * mask.unsqueeze(-1).to(gathered.dtype)
+        center = gathered[:, 4]
+        spatial = gathered.transpose(1, 2).reshape(
+            gathered.shape[0], gathered.shape[2], 3, 3,
+        )
+        mask_channel = mask.to(gathered.dtype).reshape(-1, 1, 3, 3)
+        spatial_context = self.spatial_encoder(torch.cat([spatial, mask_channel], dim=1)).flatten(1)
+        attended, _ = self.cross_attention(
+            center.unsqueeze(1), gathered, gathered, key_padding_mask=~mask,
+            need_weights=False,
+        )
+        context = self.output(torch.cat([spatial_context, attended.squeeze(1)], dim=-1))
+        return center, self.norm(center + context)
+
+
+class OpenCarbonModel(nn.Module):
+    def __init__(
+        self,
+        remote_dim: int,
+        environment_dim: int,
+        representation_dim: int = 128,
+        dropout: float = 0.2,
+    ) -> None:
+        super().__init__()
+        self.poi_encoder = POIEncoder(17, representation_dim, use_se=True)
+        self.remote_encoder = MLPEncoder(remote_dim, representation_dim, dropout)
+        self.environment_encoder = MLPEncoder(environment_dim, representation_dim, dropout)
+        self.modality_attention = ModalityAttention(representation_dim)
+        self.neighborhood_aggregator = NeighborhoodAggregator(representation_dim, dropout)
+        self.regressor = nn.Sequential(
+            nn.Linear(representation_dim * 2, representation_dim),
+            nn.ReLU(), nn.Dropout(dropout), nn.Linear(representation_dim, 1),
+        )
+
+    def forward(
+        self,
+        poi: torch.Tensor,
+        remote: torch.Tensor,
+        environment: torch.Tensor,
+        neighborhood_indices: torch.Tensor,
+        neighborhood_mask: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        poi_representation = self.poi_encoder(poi)
+        remote_representation = self.remote_encoder(remote)
+        environment_representation = self.environment_encoder(environment)
+        grid_representation = self.modality_attention([
+            poi_representation, remote_representation, environment_representation,
+        ])
+        center_representation, neighborhood_representation = self.neighborhood_aggregator(
+            grid_representation, neighborhood_indices, neighborhood_mask,
+        )
+        prediction = self.regressor(torch.cat([
+            center_representation, neighborhood_representation,
+        ], dim=-1)).squeeze(-1)
+        center_indices = neighborhood_indices[:, 4]
+        return prediction, poi_representation[center_indices], remote_representation[center_indices]

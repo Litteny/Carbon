@@ -5,11 +5,7 @@ import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from carbon_transfer.config import load_config
-from carbon_transfer.training import train_run
-
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Train one carbon-transfer experiment task")
@@ -19,6 +15,9 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
+    from carbon_transfer.config import load_config
+    from carbon_transfer.training import train_run
+
     run_dir = train_run(load_config(args.config), args.fold, args.model, args.seed, args.force)
     print(run_dir)
     return 0

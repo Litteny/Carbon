@@ -5,13 +5,24 @@ import pandas as pd
 import torch
 
 from carbon_transfer.constants import TABULAR_FEATURES, VIIRS_COLUMNS
-from carbon_transfer.datasets import SparsePOIStore, masked_edges, normalized_adjacency
+from carbon_transfer.datasets import (
+    SparsePOIStore, fixed_neighborhood_indices, masked_edges, normalized_adjacency,
+)
 from carbon_transfer.metrics import calculate_metrics
-from carbon_transfer.models import OpenCarbonModel, POIEncoder
+from carbon_transfer.models import BPNN, CarbonGCN, NeighborhoodAggregator, OpenCarbonModel, POIEncoder
+from carbon_transfer.models.bpnn import BPNN as SplitBPNN
+from carbon_transfer.models.carbongcn import CarbonGCN as SplitCarbonGCN
+from carbon_transfer.models.opencarbon import OpenCarbonModel as SplitOpenCarbonModel
 from carbon_transfer.training import _open_carbon_feature_sets
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_model_package_preserves_public_exports():
+    assert BPNN is SplitBPNN
+    assert CarbonGCN is SplitCarbonGCN
+    assert OpenCarbonModel is SplitOpenCarbonModel
 
 
 def test_forbidden_identifiers_are_not_features():
@@ -32,13 +43,34 @@ def test_open_carbon_poi_encoder_shape():
 
 
 def test_open_carbon_forward_shape():
-    model = OpenCarbonModel(8, 6, 14, representation_dim=16)
+    model = OpenCarbonModel(8, 6, representation_dim=16)
+    neighborhood_indices = torch.tensor([
+        [0, 0, 0, 0, 0, 1, 0, 2, 0],
+        [0, 0, 0, 0, 1, 0, 2, 0, 0],
+    ])
+    neighborhood_mask = torch.tensor([
+        [False, False, False, False, True, True, False, True, False],
+        [False, False, False, False, True, False, True, False, False],
+    ])
     output, poi, remote = model(
-        torch.zeros(2, 17, 256, 256), torch.zeros(2, 8),
-        torch.zeros(2, 6), torch.zeros(2, 14),
+        torch.zeros(3, 17, 256, 256), torch.zeros(3, 8),
+        torch.zeros(3, 6), neighborhood_indices, neighborhood_mask,
     )
     assert output.shape == (2,)
     assert poi.shape == remote.shape == (2, 16)
+
+
+def test_masked_neighborhood_slots_do_not_affect_context():
+    aggregator = NeighborhoodAggregator(representation_dim=8, dropout=0.0).eval()
+    nodes = torch.randn(3, 8)
+    mask = torch.tensor([[False, False, False, False, True, True, False, False, False]])
+    first = torch.tensor([[1, 1, 1, 1, 0, 1, 1, 1, 1]])
+    second = torch.tensor([[2, 2, 2, 2, 0, 1, 2, 2, 2]])
+    with torch.no_grad():
+        first_center, first_context = aggregator(nodes, first, mask)
+        second_center, second_context = aggregator(nodes, second, mask)
+    assert torch.equal(first_center, second_center)
+    assert torch.allclose(first_context, second_context)
 
 
 def test_neighbor_masking_keeps_only_present_split_nodes():
@@ -54,6 +86,24 @@ def test_neighbor_masking_keeps_only_present_split_nodes():
     adjacency = normalized_adjacency(frame, neighbors, torch.device("cpu"))
     assert adjacency.shape == (2, 2)
     assert adjacency._nnz() == 2
+
+
+def test_fixed_neighborhood_is_row_major_and_masks_outside_split():
+    frame = pd.DataFrame({
+        "city_id": ["x", "x", "x"], "period": ["202101"] * 3,
+        "cell_id": ["center", "right", "down"],
+    })
+    neighbors = pd.DataFrame({
+        "city_id": ["x"] * 6, "period": ["202101"] * 6,
+        "cell_id": ["center", "center", "center", "center", "right", "down"],
+        "neighbor_cell_id": ["center", "right", "down", "outside", "right", "down"],
+        "offset_row": [0, 0, 1, -1, 0, 0],
+        "offset_col": [0, 1, 0, 0, 0, 0],
+    })
+    neighborhoods = fixed_neighborhood_indices(frame, neighbors)
+    assert neighborhoods.shape == (3, 9)
+    assert neighborhoods[0].tolist() == [-1, -1, -1, -1, 0, 1, -1, 2, -1]
+    assert neighborhoods[1, 4] == 1
 
 
 def test_sparse_poi_can_be_densified():

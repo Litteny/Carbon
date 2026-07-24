@@ -6,13 +6,7 @@ import traceback
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
-from carbon_transfer.config import load_config, project_path
-from carbon_transfer.evaluation import aggregate_runs
-from carbon_transfer.training import train_run
-from carbon_transfer.utils import write_json
-
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run all 48 single-seed stage-1 tasks")
@@ -20,6 +14,11 @@ def main() -> int:
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Print the 48-task matrix without training")
     args = parser.parse_args()
+    from carbon_transfer.config import load_config, project_path
+    from carbon_transfer.evaluation import aggregate_runs
+    from carbon_transfer.training import train_run
+    from carbon_transfer.utils import write_json
+
     config = load_config(args.config)
     split_dir = project_path(config["split_dir"])
     folds = [path.stem for path in sorted((split_dir / "cross_city").glob("*.parquet"))]

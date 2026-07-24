@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from carbon_transfer.constants import MODEL_NAMES
 from carbon_transfer.utils import write_json
