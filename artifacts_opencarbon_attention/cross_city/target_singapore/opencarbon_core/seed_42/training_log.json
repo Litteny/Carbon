@@ -1,0 +1,79 @@
+[
+  {
+    "epoch": 1,
+    "train_loss": 0.49346726951135195,
+    "train_regression_mae": 0.49346726951135195,
+    "train_contrastive": 0.0,
+    "validation_mae": 0.5487949785038277
+  },
+  {
+    "epoch": 2,
+    "train_loss": 0.34207665945977234,
+    "train_regression_mae": 0.34207665945977234,
+    "train_contrastive": 0.0,
+    "validation_mae": 0.5590492959375735
+  },
+  {
+    "epoch": 3,
+    "train_loss": 0.5515967109403032,
+    "train_regression_mae": 0.30735190710875876,
+    "train_contrastive": 2.442447993904352,
+    "validation_mae": 0.5544222459969698
+  },
+  {
+    "epoch": 4,
+    "train_loss": 0.45888729882968027,
+    "train_regression_mae": 0.2851426424052523,
+    "train_contrastive": 1.73744653236814,
+    "validation_mae": 0.5510936270378254
+  },
+  {
+    "epoch": 5,
+    "train_loss": 0.39179789894639494,
+    "train_regression_mae": 0.2589190396761825,
+    "train_contrastive": 1.3287885614432569,
+    "validation_mae": 0.5452147274767911
+  },
+  {
+    "epoch": 6,
+    "train_loss": 0.3540835302962034,
+    "train_regression_mae": 0.2366995622788361,
+    "train_contrastive": 1.1738396530624393,
+    "validation_mae": 0.5424004184537464
+  },
+  {
+    "epoch": 7,
+    "train_loss": 0.3236676986562088,
+    "train_regression_mae": 0.217252169941487,
+    "train_contrastive": 1.064155261606238,
+    "validation_mae": 0.5678046871556176
+  },
+  {
+    "epoch": 8,
+    "train_loss": 0.3020986064721635,
+    "train_regression_mae": 0.20206305416853187,
+    "train_contrastive": 1.0003554970242603,
+    "validation_mae": 0.5530691996989426
+  },
+  {
+    "epoch": 9,
+    "train_loss": 0.2809183755889535,
+    "train_regression_mae": 0.18717842958434378,
+    "train_contrastive": 0.9373994343480918,
+    "validation_mae": 0.5434211098264765
+  },
+  {
+    "epoch": 10,
+    "train_loss": 0.2620732750185917,
+    "train_regression_mae": 0.17228105921991343,
+    "train_contrastive": 0.8979221335287357,
+    "validation_mae": 0.5430691870936641
+  },
+  {
+    "epoch": 11,
+    "train_loss": 0.2458031325151624,
+    "train_regression_mae": 0.15841650162271204,
+    "train_contrastive": 0.8738662838221116,
+    "validation_mae": 0.558263362204587
+  }
+]

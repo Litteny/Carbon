@@ -25,8 +25,9 @@ from .constants import (
     TABULAR_FEATURES, VIIRS_COLUMNS, WEATHER_COLUMNS,
 )
 from .datasets import OpenCarbonDataset, fixed_neighborhood_indices, normalized_adjacency
-from .metrics import calculate_metrics, prediction_frame
+from .metrics import calculate_admin_metrics, calculate_metrics, prediction_frame
 from .models import BPNN, CarbonGCN, OpenCarbonModel, contrastive_loss
+from .progress import OpenCarbonEpochProgress
 from .utils import resolve_device, set_seed, sha256_file, write_json
 
 
@@ -255,6 +256,7 @@ def _open_carbon_feature_sets(model_name: str) -> Tuple[List[str], List[str]]:
 
 def _train_open_carbon(
     model_name: str,
+    fold_id: str,
     frames: Dict[str, pd.DataFrame],
     neighbors: pd.DataFrame,
     config: Dict,
@@ -315,66 +317,75 @@ def _train_open_carbon(
         stale = int(checkpoint.get("stale", 0))
         log = checkpoint.get("log", [])
 
-    for epoch in range(start_epoch, int(settings["max_epochs"])):
-        model.train()
-        optimizer.zero_grad(set_to_none=True)
-        train_losses = []
-        for step, batch in enumerate(loaders["train"]):
-            batch = {key: value.to(device, non_blocking=True) for key, value in batch.items()}
-            with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
-                prediction, poi_representation, remote_representation = model(
-                    batch["poi"], batch["remote"], batch["environment"],
-                    batch["neighborhood_indices"], batch["neighborhood_mask"],
-                )
-                regression = torch.mean(torch.abs(prediction - batch["target"]))
-                if epoch >= int(settings["contrastive_warmup_epochs"]) and len(prediction) > 1:
-                    contrast = contrastive_loss(
-                        poi_representation, remote_representation, float(settings.get("temperature", 0.07)),
-                    )
-                    loss = regression + float(settings["contrastive_weight"]) * contrast
-                else:
-                    contrast = torch.zeros((), device=device)
-                    loss = regression
-                scaled_loss = loss / accumulation
-            scaler.scale(scaled_loss).backward()
-            if (step + 1) % accumulation == 0 or step + 1 == len(loaders["train"]):
-                scaler.step(optimizer)
-                scaler.update()
-                optimizer.zero_grad(set_to_none=True)
-            train_losses.append((float(loss.detach().cpu()), float(regression.detach().cpu()), float(contrast.detach().cpu())))
-
-        model.eval()
-        validation_losses = []
-        with torch.no_grad():
-            for batch in loaders["validation"]:
+    max_epochs = int(settings["max_epochs"])
+    with OpenCarbonEpochProgress(fold_id, model_name, start_epoch, max_epochs) as progress:
+        for epoch in range(start_epoch, max_epochs):
+            model.train()
+            optimizer.zero_grad(set_to_none=True)
+            train_losses = []
+            for step, batch in enumerate(loaders["train"]):
                 batch = {key: value.to(device, non_blocking=True) for key, value in batch.items()}
                 with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
-                    prediction, _, _ = model(
+                    prediction, poi_representation, remote_representation = model(
                         batch["poi"], batch["remote"], batch["environment"],
                         batch["neighborhood_indices"], batch["neighborhood_mask"],
                     )
-                validation_losses.append(float(torch.mean(torch.abs(prediction - batch["target"])).cpu()))
-        validation_loss = float(np.mean(validation_losses))
-        entry = {
-            "epoch": epoch + 1,
-            "train_loss": float(np.mean([value[0] for value in train_losses])),
-            "train_regression_mae": float(np.mean([value[1] for value in train_losses])),
-            "train_contrastive": float(np.mean([value[2] for value in train_losses])),
-            "validation_mae": validation_loss,
-        }
-        log.append(entry)
-        if validation_loss < best_loss - 1e-8:
-            best_loss, stale = validation_loss, 0
-            torch.save({"model_state": model.state_dict(), "epoch": epoch + 1}, run_dir / "best.pt")
-        else:
-            stale += 1
-        torch.save({
-            "model_state": model.state_dict(), "optimizer_state": optimizer.state_dict(),
-            "epoch": epoch + 1, "best_loss": best_loss, "stale": stale, "log": log,
-        }, latest_path)
-        write_json(run_dir / "training_log.json", log)
-        if stale >= int(settings["patience"]):
-            break
+                    regression = torch.mean(torch.abs(prediction - batch["target"]))
+                    if epoch >= int(settings["contrastive_warmup_epochs"]) and len(prediction) > 1:
+                        contrast = contrastive_loss(
+                            poi_representation, remote_representation,
+                            float(settings.get("temperature", 0.07)),
+                        )
+                        loss = regression + float(settings["contrastive_weight"]) * contrast
+                    else:
+                        contrast = torch.zeros((), device=device)
+                        loss = regression
+                    scaled_loss = loss / accumulation
+                scaler.scale(scaled_loss).backward()
+                if (step + 1) % accumulation == 0 or step + 1 == len(loaders["train"]):
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad(set_to_none=True)
+                train_losses.append((
+                    float(loss.detach().cpu()), float(regression.detach().cpu()),
+                    float(contrast.detach().cpu()),
+                ))
+
+            model.eval()
+            validation_losses = []
+            with torch.no_grad():
+                for batch in loaders["validation"]:
+                    batch = {key: value.to(device, non_blocking=True) for key, value in batch.items()}
+                    with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
+                        prediction, _, _ = model(
+                            batch["poi"], batch["remote"], batch["environment"],
+                            batch["neighborhood_indices"], batch["neighborhood_mask"],
+                        )
+                    validation_losses.append(float(torch.mean(torch.abs(
+                        prediction - batch["target"]
+                    )).cpu()))
+            validation_loss = float(np.mean(validation_losses))
+            entry = {
+                "epoch": epoch + 1,
+                "train_loss": float(np.mean([value[0] for value in train_losses])),
+                "train_regression_mae": float(np.mean([value[1] for value in train_losses])),
+                "train_contrastive": float(np.mean([value[2] for value in train_losses])),
+                "validation_mae": validation_loss,
+            }
+            log.append(entry)
+            if validation_loss < best_loss - 1e-8:
+                best_loss, stale = validation_loss, 0
+                torch.save({"model_state": model.state_dict(), "epoch": epoch + 1}, run_dir / "best.pt")
+            else:
+                stale += 1
+            torch.save({
+                "model_state": model.state_dict(), "optimizer_state": optimizer.state_dict(),
+                "epoch": epoch + 1, "best_loss": best_loss, "stale": stale, "log": log,
+            }, latest_path)
+            write_json(run_dir / "training_log.json", log)
+            progress.update(entry, best_loss, stale)
+            if stale >= int(settings["patience"]):
+                break
 
     model.load_state_dict(torch.load(run_dir / "best.pt", map_location=device, weights_only=True)["model_state"])
     model.eval()
@@ -426,7 +437,7 @@ def train_run(config: Dict, fold_id: str, model_name: str, seed: int = 42, force
         predictions = _train_gcn(frames, neighbors, settings, device, run_dir)
     else:
         predictions = _train_open_carbon(
-            model_name, frames, neighbors, config, settings, device, run_dir,
+            model_name, fold_id, frames, neighbors, config, settings, device, run_dir,
         )
 
     context = {"experiment": experiment, "fold_id": fold_id, "model": model_name, "seed": int(seed)}
@@ -434,6 +445,8 @@ def train_run(config: Dict, fold_id: str, model_name: str, seed: int = 42, force
     output.to_parquet(run_dir / "predictions.parquet", index=False)
     monthly, summary = calculate_metrics(output)
     monthly.to_csv(run_dir / "metrics_monthly.csv", index=False)
+    if experiment.startswith("single_month_cross_region"):
+        calculate_admin_metrics(output).to_csv(run_dir / "metrics_by_admin.csv", index=False)
     write_json(run_dir / "metrics_summary.json", summary)
     complete_marker.write_text("complete\n", encoding="utf-8")
     return run_dir

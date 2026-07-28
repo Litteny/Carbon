@@ -46,10 +46,28 @@ def calculate_metrics(predictions: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
         "metrics": {
             column: {
                 "mean": float(monthly[column].mean(skipna=True)),
-                "std_across_months": float(monthly[column].std(skipna=True, ddof=1)),
+                "std_across_months": (
+                    float(monthly[column].std(skipna=True, ddof=1))
+                    if monthly[column].notna().sum() > 1 else None
+                ),
                 "valid_months": int(monthly[column].notna().sum()),
             }
             for column in metric_columns
         },
     }
     return monthly, summary
+
+
+def calculate_admin_metrics(predictions: pd.DataFrame) -> pd.DataFrame:
+    """Calculate single-month metrics independently for each test region."""
+    rows = []
+    for admin_id, group in predictions.groupby("admin_id", sort=True, dropna=False):
+        metrics, _ = calculate_metrics(group)
+        row = metrics.iloc[0].to_dict()
+        row["admin_id"] = admin_id
+        rows.append(row)
+    columns = [
+        "admin_id", "period", "n", "log_r2", "log_mae", "log_rmse",
+        "log_spearman", "tc_mae", "tc_rmse", "r2_status",
+    ]
+    return pd.DataFrame(rows).reindex(columns=columns)

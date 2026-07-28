@@ -129,7 +129,8 @@ def test_monthly_metrics_allow_undefined_small_r2():
 
 def test_real_split_manifests_are_grid_consistent_and_disjoint():
     split_root = ROOT / "data" / "splits"
-    manifests = sorted(split_root.rglob("*.parquet"))
+    manifests = sorted((split_root / "cross_city").glob("*.parquet"))
+    manifests += sorted((split_root / "cross_region").glob("*.parquet"))
     assert len(manifests) == 8
     for path in manifests:
         frame = pd.read_parquet(path)

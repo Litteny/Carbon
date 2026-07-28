@@ -1,0 +1,52 @@
+{
+  "experiment": "single_month_cross_region_multiseed",
+  "fold_id": "202208_nyc_split_seed_44",
+  "model": "opencarbon_monthly",
+  "seed": 44,
+  "device": "cuda",
+  "python": "3.10.16 (main, Dec 11 2024, 16:24:50) [GCC 11.2.0]",
+  "platform": "Linux-3.10.0-957.el7.x86_64-x86_64-with-glibc2.31",
+  "torch": "2.4.1+cu121",
+  "cuda_available": true,
+  "manifest": "/home/user/LYT/Carbon/data/splits/single_month_cross_region_multiseed/202208_nyc_split_seed_44.parquet",
+  "manifest_sha256": "46cca80674281b083d01122d5b1f13c42ebf02908399daaf119b8fc575b656d6",
+  "panel_sha256": "25256da0aaffc7382cd225e624c5668a1f5519dcd15054d65317fcf2e58448a2",
+  "started_at": "2026-07-27T20:22:52+0800",
+  "config": {
+    "data_config": "configs/data.yaml",
+    "experiment_config": "configs/experiments_single_month_multiseed.yaml",
+    "panel_file": "data/features/grid_month_panel.parquet",
+    "neighbors_file": "data/features/neighbors.parquet",
+    "poi_dir": "data/features/poi_sparse",
+    "split_dir": "data/splits",
+    "split_experiment": "single_month_cross_region_multiseed",
+    "artifact_dir": "artifacts_single_month_multiseed",
+    "report_dir": "reports/single_month_multiseed",
+    "period": "202208",
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "device": "auto",
+    "models": [
+      "opencarbon_monthly"
+    ],
+    "training": {
+      "representation_dim": 128,
+      "dropout": 0.2,
+      "learning_rate": 0.001,
+      "weight_decay": 0.0001,
+      "max_epochs": 25,
+      "contrastive_warmup_epochs": 2,
+      "contrastive_weight": 0.1,
+      "patience": 5,
+      "batch_size": 16,
+      "gradient_accumulation": 2,
+      "amp": true,
+      "num_workers": 2,
+      "temperature": 0.07
+    },
+    "_config_path": "configs/single_month_multiseed_gpu.yaml"
+  }
+}

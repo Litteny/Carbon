@@ -1,0 +1,7 @@
+experiment: single_month_cross_region
+panel_file: data/features/grid_month_panel.parquet
+split_dir: data/splits
+period: "202208"
+cities: [chicago, nyc, singapore, tokyo]
+split_seed: 42
+split_ratios: [0.7, 0.2, 0.1]

@@ -9,6 +9,7 @@ import pandas as pd
 
 from .config import project_path
 from .utils import sha256_file, write_json
+from .single_month import build_single_month_splits
 
 
 SPLIT_COLUMNS = ["city_id", "cell_id", "period", "admin_id", "admin_name", "split"]
@@ -48,6 +49,8 @@ def _write_manifest(frame: pd.DataFrame, path: Path, experiment: str, fold_id: s
 
 
 def build_splits(config: Dict) -> Dict:
+    if str(config.get("experiment", "")).startswith("single_month_cross_region"):
+        return build_single_month_splits(config, _write_manifest)
     panel_path = project_path(config["panel_file"])
     panel = pd.read_parquet(panel_path, columns=["city_id", "cell_id", "period", "admin_id", "admin_name"])
     panel["period"] = panel["period"].astype(str)

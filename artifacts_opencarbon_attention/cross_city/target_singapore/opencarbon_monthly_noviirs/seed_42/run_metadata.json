@@ -1,0 +1,47 @@
+{
+  "experiment": "cross_city",
+  "fold_id": "target_singapore",
+  "model": "opencarbon_monthly_noviirs",
+  "seed": 42,
+  "device": "cuda",
+  "python": "3.10.16 (main, Dec 11 2024, 16:24:50) [GCC 11.2.0]",
+  "platform": "Linux-3.10.0-957.el7.x86_64-x86_64-with-glibc2.31",
+  "torch": "2.4.1+cu121",
+  "cuda_available": true,
+  "manifest": "/home/user/LYT/Carbon/data/splits/cross_city/target_singapore.parquet",
+  "manifest_sha256": "52b7d5ee5462db188166689c72bf3822d7d01e89805cd9cab8f8ffb6a014d4ff",
+  "panel_sha256": "25256da0aaffc7382cd225e624c5668a1f5519dcd15054d65317fcf2e58448a2",
+  "started_at": "2026-07-27T04:56:11+0800",
+  "config": {
+    "data_config": "configs/data.yaml",
+    "experiment_config": "configs/experiments.yaml",
+    "panel_file": "data/features/grid_month_panel.parquet",
+    "neighbors_file": "data/features/neighbors.parquet",
+    "poi_dir": "data/features/poi_sparse",
+    "split_dir": "data/splits",
+    "artifact_dir": "artifacts_opencarbon_attention",
+    "seed": 42,
+    "device": "cuda",
+    "models": [
+      "opencarbon_core",
+      "opencarbon_monthly",
+      "opencarbon_monthly_noviirs"
+    ],
+    "training": {
+      "representation_dim": 128,
+      "dropout": 0.2,
+      "learning_rate": 0.001,
+      "weight_decay": 0.0001,
+      "max_epochs": 25,
+      "contrastive_warmup_epochs": 2,
+      "contrastive_weight": 0.1,
+      "patience": 5,
+      "batch_size": 16,
+      "gradient_accumulation": 2,
+      "amp": true,
+      "num_workers": 2,
+      "temperature": 0.07
+    },
+    "_config_path": "configs/stage1_opencarbon_attention.yaml"
+  }
+}

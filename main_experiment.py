@@ -97,22 +97,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 0
 
     from carbon_transfer.training import train_run
+    from carbon_transfer.progress import OpenCarbonTaskProgress, run_is_complete
     from carbon_transfer.utils import write_json
 
     failures = []
-    for model in models:
-        try:
-            run_dir = train_run(config, fold, model, seed, args.force)
-            print(run_dir)
-        except Exception as error:
-            failures.append({
-                "fold": fold,
-                "model": model,
-                "seed": seed,
-                "error": repr(error),
-                "traceback": traceback.format_exc(),
-            })
-            print(f"FAILED fold={fold} model={model}: {error}", file=sys.stderr, flush=True)
+    tasks = [(fold, model, seed) for model in models]
+    with OpenCarbonTaskProgress(tasks) as progress:
+        for _, model, _ in tasks:
+            was_complete = run_is_complete(project_path(config["artifact_dir"]), fold, model, seed)
+            try:
+                run_dir = train_run(config, fold, model, seed, args.force)
+                print(run_dir)
+                status = "skipped" if was_complete and not args.force else "completed"
+                progress.finish(fold, model, status)
+            except Exception as error:
+                failures.append({
+                    "fold": fold,
+                    "model": model,
+                    "seed": seed,
+                    "error": repr(error),
+                    "traceback": traceback.format_exc(),
+                })
+                print(f"FAILED fold={fold} model={model}: {error}", file=sys.stderr, flush=True)
+                progress.finish(fold, model, "failed")
 
     if failures:
         failure_path = project_path(config["artifact_dir"]) / "experiment_failures.json"

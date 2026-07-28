@@ -1,0 +1,37 @@
+{
+  "single_seed_preliminary": true,
+  "periods": 1,
+  "samples": 84,
+  "metrics": {
+    "log_r2": {
+      "mean": -0.17892864800808161,
+      "std_across_months": null,
+      "valid_months": 1
+    },
+    "log_mae": {
+      "mean": 0.9741797894941622,
+      "std_across_months": null,
+      "valid_months": 1
+    },
+    "log_rmse": {
+      "mean": 2.2712111583335126,
+      "std_across_months": null,
+      "valid_months": 1
+    },
+    "log_spearman": {
+      "mean": 0.4058987638062048,
+      "std_across_months": null,
+      "valid_months": 1
+    },
+    "tc_mae": {
+      "mean": 323.1870754279163,
+      "std_across_months": null,
+      "valid_months": 1
+    },
+    "tc_rmse": {
+      "mean": 430.3277609388583,
+      "std_across_months": null,
+      "valid_months": 1
+    }
+  }
+}

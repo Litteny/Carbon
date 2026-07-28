@@ -45,3 +45,38 @@ completed result, pass `--force`.
 Formal outputs are written below `artifacts/`; the consolidated single-seed report is written to
 `reports/stage1/`. The exhaustive 213-region experiment and additional seeds are deliberately not
 started by this command.
+
+## Single-month cross-region pilot (2022-08)
+
+Build the deterministic administrative-region splits and preview the four-task matrix:
+
+```bash
+python scripts/build_splits.py --config configs/experiments_single_month.yaml
+python scripts/run_single_month.py --config configs/single_month_gpu.yaml --dry-run
+```
+
+Run the pilot with `opencarbon_monthly` and seed 42:
+
+```bash
+python scripts/run_single_month.py --config configs/single_month_gpu.yaml
+```
+
+OpenCarbon runs display overall task progress and per-task epoch progress in an interactive
+terminal. Redirected logs use one stable line per epoch and include training loss, validation MAE,
+best validation MAE, and the early-stopping counter.
+
+The split manifests are written under `data/splits/single_month_cross_region/`. Training artifacts
+and the four-city macro/grid-weighted report are isolated under `artifacts_single_month/` and
+`reports/single_month/`. Completed runs are skipped unless `--force` is supplied.
+
+For the joint split/training seed experiment (`42`, `43`, `44`), use:
+
+```bash
+python scripts/build_splits.py --config configs/experiments_single_month_multiseed.yaml
+python scripts/run_single_month_multiseed.py --config configs/single_month_multiseed_gpu.yaml --dry-run
+python scripts/run_single_month_multiseed.py --config configs/single_month_multiseed_gpu.yaml
+```
+
+This creates 12 tasks (four cities by three seeds). Each seed uses a different administrative-region
+split and the same value for model initialization. Outputs are isolated under
+`artifacts_single_month_multiseed/` and `reports/single_month_multiseed/`.

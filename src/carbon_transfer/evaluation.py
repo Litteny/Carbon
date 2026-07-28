@@ -112,3 +112,137 @@ def aggregate_runs(artifact_dir: Path, report_dir: Path) -> Dict:
             lines.append(_markdown_table(pd.DataFrame(summary["viirs_sensitivity"])))
     (report_dir / "stage1_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return summary
+
+
+def aggregate_single_month_runs(artifact_dir: Path, report_dir: Path, expected_runs: int = 4) -> Dict:
+    """Aggregate one-month regional-transfer runs without month-variance fields."""
+    metric_names = ["log_r2", "log_mae", "log_rmse", "log_spearman", "tc_mae", "tc_rmse"]
+    records = []
+    admin_frames = []
+    for metric_file in sorted(artifact_dir.rglob("metrics_monthly.csv")):
+        predictions = pd.read_parquet(metric_file.parent / "predictions.parquet")
+        if predictions.empty or predictions["experiment"].iloc[0] != "single_month_cross_region":
+            continue
+        metrics = pd.read_csv(metric_file).iloc[0]
+        record = predictions.iloc[0][["experiment", "fold_id", "model", "seed", "city_id"]].to_dict()
+        record.update({"test_samples": len(predictions), "test_grids": int(predictions["cell_id"].nunique())})
+        record.update({name: metrics[name] for name in metric_names})
+        records.append(record)
+        admin_file = metric_file.parent / "metrics_by_admin.csv"
+        if admin_file.exists():
+            admin_frames.append(pd.read_csv(admin_file).assign(
+                city_id=record["city_id"], fold_id=record["fold_id"],
+                model=record["model"], seed=record["seed"],
+            ))
+    results = pd.DataFrame(records)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    results.to_csv(report_dir / "single_month_results.csv", index=False)
+    if admin_frames:
+        pd.concat(admin_frames, ignore_index=True).to_csv(
+            report_dir / "single_month_admin_results.csv", index=False,
+        )
+
+    macro, weighted = {}, {}
+    if not results.empty:
+        weights = results["test_grids"].to_numpy(dtype=float)
+        for name in metric_names:
+            values = results[name].to_numpy(dtype=float)
+            valid = pd.notna(values)
+            macro[name] = float(pd.Series(values).mean(skipna=True))
+            weighted[name] = (
+                float((values[valid] * weights[valid]).sum() / weights[valid].sum())
+                if valid.any() else None
+            )
+    summary = {
+        "experiment": "single_month_cross_region", "period": "202208",
+        "completed_runs": int(len(results)), "expected_runs": int(expected_runs),
+        "single_seed_preliminary": True, "city_macro": macro, "grid_weighted": weighted,
+    }
+    write_json(report_dir / "single_month_summary.json", summary)
+    lines = [
+        "# 2022-08 single-month cross-region experiment", "",
+        "> Single-seed (`42`) preliminary results; no across-month or across-seed variance is reported.", "",
+        f"Completed runs: **{len(results)} / {expected_runs}**", "",
+    ]
+    if not results.empty:
+        lines.extend([_markdown_table(results), "", "## City macro average", "",
+                      _markdown_table(pd.DataFrame([macro])), "",
+                      "## Test-grid weighted average", "",
+                      _markdown_table(pd.DataFrame([weighted]))])
+    (report_dir / "single_month_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return summary
+
+
+def aggregate_single_month_multiseed_runs(
+    artifact_dir: Path, report_dir: Path, expected_runs: int = 12,
+) -> Dict:
+    """Aggregate per-city mean/std across joint split and training seeds."""
+    metric_names = ["log_r2", "log_mae", "log_rmse", "log_spearman", "tc_mae", "tc_rmse"]
+    records = []
+    admin_frames = []
+    for metric_file in sorted(artifact_dir.rglob("metrics_monthly.csv")):
+        predictions = pd.read_parquet(metric_file.parent / "predictions.parquet")
+        if predictions.empty or predictions["experiment"].iloc[0] != "single_month_cross_region_multiseed":
+            continue
+        metrics = pd.read_csv(metric_file).iloc[0]
+        record = predictions.iloc[0][["experiment", "fold_id", "model", "seed", "city_id"]].to_dict()
+        record.update({"test_samples": len(predictions), "test_grids": predictions["cell_id"].nunique()})
+        record.update({name: metrics[name] for name in metric_names})
+        records.append(record)
+        admin_file = metric_file.parent / "metrics_by_admin.csv"
+        if admin_file.exists():
+            admin_frames.append(pd.read_csv(admin_file).assign(
+                city_id=record["city_id"], fold_id=record["fold_id"],
+                model=record["model"], seed=record["seed"],
+            ))
+    results = pd.DataFrame(records)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    results.to_csv(report_dir / "multiseed_results.csv", index=False)
+    if admin_frames:
+        pd.concat(admin_frames, ignore_index=True).to_csv(
+            report_dir / "multiseed_admin_results.csv", index=False,
+        )
+
+    city_rows = []
+    if not results.empty:
+        for city_id, group in results.groupby("city_id", sort=True):
+            row = {"city_id": city_id, "runs": len(group), "test_grids_mean": group["test_grids"].mean()}
+            for metric in metric_names:
+                row[f"{metric}_mean"] = group[metric].mean(skipna=True)
+                row[f"{metric}_std_seeds"] = group[metric].std(skipna=True, ddof=1)
+            city_rows.append(row)
+    city_summary = pd.DataFrame(city_rows)
+    city_summary.to_csv(report_dir / "multiseed_city_summary.csv", index=False)
+
+    seed_macro_rows = []
+    if not results.empty:
+        for seed, group in results.groupby("seed", sort=True):
+            row = {"seed": int(seed)}
+            for metric in metric_names:
+                row[metric] = group[metric].mean(skipna=True)
+            seed_macro_rows.append(row)
+    seed_macro = pd.DataFrame(seed_macro_rows)
+    seed_macro.to_csv(report_dir / "multiseed_seed_macro.csv", index=False)
+    overall = {}
+    for metric in metric_names:
+        values = seed_macro[metric] if not seed_macro.empty else pd.Series(dtype=float)
+        overall[metric] = {
+            "mean": float(values.mean()) if not values.empty else None,
+            "std_across_seeds": float(values.std(ddof=1)) if len(values) > 1 else None,
+        }
+    summary = {
+        "experiment": "single_month_cross_region_multiseed", "period": "202208",
+        "completed_runs": len(results), "expected_runs": expected_runs,
+        "seeds": sorted(results["seed"].astype(int).unique().tolist()) if not results.empty else [],
+        "overall_city_macro": overall,
+    }
+    write_json(report_dir / "multiseed_summary.json", summary)
+    lines = [
+        "# 2022-08 single-month cross-region multi-seed experiment", "",
+        f"Completed runs: **{len(results)} / {expected_runs}**", "",
+    ]
+    if not results.empty:
+        lines.extend(["## Per-city mean and standard deviation", "", _markdown_table(city_summary), "",
+                      "## Four-city macro average by seed", "", _markdown_table(seed_macro)])
+    (report_dir / "multiseed_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return summary
