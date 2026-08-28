@@ -58,6 +58,22 @@ def calculate_metrics(predictions: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
     return monthly, summary
 
 
+def calculate_yearly_metrics(monthly: pd.DataFrame) -> pd.DataFrame:
+    """Summarize monthly metrics independently for each calendar year."""
+    metric_columns = ["log_r2", "log_mae", "log_rmse", "log_spearman", "tc_mae", "tc_rmse"]
+    frame = monthly.copy()
+    frame["year"] = frame["period"].astype(str).str[:4]
+    rows = []
+    for year, group in frame.groupby("year", sort=True):
+        row = {"year": str(year), "months": int(group["period"].nunique()), "n": int(group["n"].sum())}
+        for metric in metric_columns:
+            row[f"{metric}_mean"] = group[metric].mean(skipna=True)
+            row[f"{metric}_std_months"] = group[metric].std(skipna=True, ddof=1)
+            row[f"{metric}_valid_months"] = int(group[metric].notna().sum())
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def calculate_admin_metrics(predictions: pd.DataFrame) -> pd.DataFrame:
     """Calculate single-month metrics independently for each test region."""
     rows = []
@@ -71,3 +87,27 @@ def calculate_admin_metrics(predictions: pd.DataFrame) -> pd.DataFrame:
         "log_spearman", "tc_mae", "tc_rmse", "r2_status",
     ]
     return pd.DataFrame(rows).reindex(columns=columns)
+
+
+def calculate_annual_admin_metrics(predictions: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Return per-admin monthly metrics and their annual summaries."""
+    metric_columns = ["log_r2", "log_mae", "log_rmse", "log_spearman", "tc_mae", "tc_rmse"]
+    monthly_frames = []
+    annual_rows = []
+    for admin_id, group in predictions.groupby("admin_id", sort=True, dropna=False):
+        monthly, _ = calculate_metrics(group)
+        monthly.insert(0, "admin_id", admin_id)
+        monthly_frames.append(monthly)
+        row = {
+            "admin_id": admin_id,
+            "months": int(monthly["period"].nunique()),
+            "samples": int(len(group)),
+            "grids": int(group["cell_id"].nunique()),
+        }
+        for metric in metric_columns:
+            row[f"{metric}_mean"] = monthly[metric].mean(skipna=True)
+            row[f"{metric}_std_months"] = monthly[metric].std(skipna=True, ddof=1)
+            row[f"{metric}_valid_months"] = int(monthly[metric].notna().sum())
+        annual_rows.append(row)
+    monthly_result = pd.concat(monthly_frames, ignore_index=True) if monthly_frames else pd.DataFrame()
+    return monthly_result, pd.DataFrame(annual_rows)

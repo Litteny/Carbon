@@ -1,0 +1,16 @@
+experiment: cross_city_multisource_tokyo
+panel_file: data/features/grid_month_panel.parquet
+split_dir: data/splits
+fixed_cross_city_folds:
+- fold_id: chicago_nyc_train_singapore_validation_tokyo_test
+  train_cities: [chicago, nyc]
+  validation_cities: [singapore]
+  test_cities: [tokyo]
+- fold_id: chicago_singapore_train_nyc_validation_tokyo_test
+  train_cities: [chicago, singapore]
+  validation_cities: [nyc]
+  test_cities: [tokyo]
+- fold_id: nyc_singapore_train_chicago_validation_tokyo_test
+  train_cities: [nyc, singapore]
+  validation_cities: [chicago]
+  test_cities: [tokyo]

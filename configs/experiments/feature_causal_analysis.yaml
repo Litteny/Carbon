@@ -1,0 +1,48 @@
+experiment: feature_causal_analysis
+panel_file: data/features/grid_month_panel.parquet
+outcome: log1p_emission
+artifact_dir: outputs/feature_causal_analysis/runs
+report_dir: outputs/feature_causal_analysis/reports
+seed: 42
+
+# X[t-lag]. -1 is a future-feature temporal negative control.
+lags: [0, 1, 3, 6, -1]
+
+# Keep zero for the first full run; use 100+ for confirmatory selected features.
+placebo_iterations: 0
+
+# Empty means label provenance has not been externally verified. In that case
+# VIIRS estimates are automatically limited to grade D. Verified provenance
+# removes circularity uncertainty, but VIIRS remains an activity/outcome proxy.
+label_feature_sources: []
+
+# Controls are measured at the same grid-month. Grid fixed effects and
+# city-by-period fixed effects are absorbed separately by the estimator.
+controls:
+  weather:
+    - temperature_2m_mean_c
+    - relative_humidity_2m_mean_pct
+    - precipitation_sum_mm
+    - wind_speed_10m_max_kmh
+    - shortwave_radiation_sum_mj_m2
+  modis:
+    - temperature_2m_mean_c
+    - relative_humidity_2m_mean_pct
+    - precipitation_sum_mm
+    - wind_speed_10m_max_kmh
+    - shortwave_radiation_sum_mj_m2
+  viirs:
+    - temperature_2m_mean_c
+    - relative_humidity_2m_mean_pct
+    - precipitation_sum_mm
+    - wind_speed_10m_max_kmh
+    - shortwave_radiation_sum_mj_m2
+  poi:
+    - temperature_2m_mean_c
+    - relative_humidity_2m_mean_pct
+    - precipitation_sum_mm
+    - wind_speed_10m_max_kmh
+    - shortwave_radiation_sum_mj_m2
+
+# Per-feature role, lags, or caveat may be overridden here after domain review.
+feature_overrides: {}

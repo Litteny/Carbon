@@ -93,6 +93,42 @@ class NeighborhoodAggregator(nn.Module):
         return center, self.norm(center + context)
 
 
+class MeanMLPGatedNeighborhoodAggregator(nn.Module):
+    """Fuse the center with a masked mean of its fixed 3x3 neighborhood."""
+
+    def __init__(self, representation_dim: int, dropout: float) -> None:
+        super().__init__()
+        self.neighborhood_mlp = nn.Sequential(
+            nn.Linear(representation_dim, representation_dim),
+            nn.ReLU(), nn.Dropout(dropout),
+            nn.Linear(representation_dim, representation_dim),
+        )
+        self.gate = nn.Linear(representation_dim * 2, representation_dim)
+
+    def forward(
+        self,
+        fused_nodes: torch.Tensor,
+        neighborhood_indices: torch.Tensor,
+        neighborhood_mask: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        if neighborhood_indices.ndim != 2 or neighborhood_indices.shape[1] != 9:
+            raise ValueError("neighborhood_indices must have shape [batch, 9]")
+        if neighborhood_mask.shape != neighborhood_indices.shape:
+            raise ValueError("neighborhood_mask must match neighborhood_indices")
+        mask = neighborhood_mask.to(dtype=torch.bool)
+        if not torch.all(mask[:, 4]):
+            raise ValueError("Every 3x3 neighborhood must contain its center node")
+
+        gathered = fused_nodes[neighborhood_indices]
+        weights = mask.unsqueeze(-1).to(gathered.dtype)
+        center = gathered[:, 4]
+        mean = (gathered * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1.0)
+        neighborhood = self.neighborhood_mlp(mean)
+        gate = torch.sigmoid(self.gate(torch.cat([center, neighborhood], dim=-1)))
+        fused = gate * center + (1.0 - gate) * neighborhood
+        return center, fused
+
+
 class OpenCarbonModel(nn.Module):
     def __init__(
         self,
@@ -100,27 +136,45 @@ class OpenCarbonModel(nn.Module):
         environment_dim: int,
         representation_dim: int = 128,
         dropout: float = 0.2,
+        neighborhood_aggregation: str = "spatial_attention",
+        poi_input_mode: str = "dense",
     ) -> None:
         super().__init__()
-        self.poi_encoder = POIEncoder(17, representation_dim, use_se=True)
+        if poi_input_mode == "dense":
+            self.poi_encoder = POIEncoder(17, representation_dim, use_se=True)
+        elif poi_input_mode == "tabular":
+            self.poi_encoder = MLPEncoder(17, representation_dim, dropout)
+        else:
+            raise ValueError(f"Unknown poi_input_mode={poi_input_mode}")
         self.remote_encoder = MLPEncoder(remote_dim, representation_dim, dropout)
         self.environment_encoder = MLPEncoder(environment_dim, representation_dim, dropout)
         self.modality_attention = ModalityAttention(representation_dim)
-        self.neighborhood_aggregator = NeighborhoodAggregator(representation_dim, dropout)
+        aggregators = {
+            "spatial_attention": NeighborhoodAggregator,
+            "mean_mlp_gate": MeanMLPGatedNeighborhoodAggregator,
+        }
+        if neighborhood_aggregation not in aggregators:
+            raise ValueError(
+                f"Unknown neighborhood_aggregation: {neighborhood_aggregation}; "
+                f"expected one of {sorted(aggregators)}"
+            )
+        self.neighborhood_aggregation = neighborhood_aggregation
+        self.neighborhood_aggregator = aggregators[neighborhood_aggregation](
+            representation_dim, dropout,
+        )
         self.regressor = nn.Sequential(
             nn.Linear(representation_dim * 2, representation_dim),
             nn.ReLU(), nn.Dropout(dropout), nn.Linear(representation_dim, 1),
         )
 
-    def forward(
+    def forward_encoded(
         self,
-        poi: torch.Tensor,
+        poi_representation: torch.Tensor,
         remote: torch.Tensor,
         environment: torch.Tensor,
         neighborhood_indices: torch.Tensor,
         neighborhood_mask: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        poi_representation = self.poi_encoder(poi)
         remote_representation = self.remote_encoder(remote)
         environment_representation = self.environment_encoder(environment)
         grid_representation = self.modality_attention([
@@ -134,3 +188,16 @@ class OpenCarbonModel(nn.Module):
         ], dim=-1)).squeeze(-1)
         center_indices = neighborhood_indices[:, 4]
         return prediction, poi_representation[center_indices], remote_representation[center_indices]
+
+    def forward(
+        self,
+        poi: torch.Tensor,
+        remote: torch.Tensor,
+        environment: torch.Tensor,
+        neighborhood_indices: torch.Tensor,
+        neighborhood_mask: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        return self.forward_encoded(
+            self.poi_encoder(poi), remote, environment,
+            neighborhood_indices, neighborhood_mask,
+        )

@@ -1,0 +1,39 @@
+experiment: feature_transfer_screening
+panel_file: data/features/grid_month_panel.parquet
+causal_run_dir: outputs/feature_causal_analysis/runs
+report_dir: outputs/feature_transfer_screening/reports
+outcome: log1p_emission
+seed: 42
+
+bootstrap_iterations: 20
+partial_r2_relevance_threshold: 0.0001
+domain_folds: 5
+max_domain_samples_per_city: 5000
+
+controls:
+  weather:
+    - temperature_2m_mean_c
+    - relative_humidity_2m_mean_pct
+    - precipitation_sum_mm
+    - wind_speed_10m_max_kmh
+    - shortwave_radiation_sum_mj_m2
+  modis:
+    - temperature_2m_mean_c
+    - relative_humidity_2m_mean_pct
+    - precipitation_sum_mm
+    - wind_speed_10m_max_kmh
+    - shortwave_radiation_sum_mj_m2
+  viirs:
+    - temperature_2m_mean_c
+    - relative_humidity_2m_mean_pct
+    - precipitation_sum_mm
+    - wind_speed_10m_max_kmh
+    - shortwave_radiation_sum_mj_m2
+  poi:
+    - temperature_2m_mean_c
+    - relative_humidity_2m_mean_pct
+    - precipitation_sum_mm
+    - wind_speed_10m_max_kmh
+    - shortwave_radiation_sum_mj_m2
+
+feature_overrides: {}

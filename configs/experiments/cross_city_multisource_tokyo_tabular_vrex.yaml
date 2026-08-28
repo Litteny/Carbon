@@ -1,0 +1,31 @@
+data_config: configs/data.yaml
+experiment_config: configs/experiments.yaml
+panel_file: data/features/grid_month_panel.parquet
+neighbors_file: data/features/neighbors.parquet
+poi_dir: data/features/poi_sparse
+split_dir: data/splits
+split_experiment: cross_city_multisource_tokyo
+artifact_dir: outputs/cross_city_multisource_tokyo_tabular_vrex/runs
+report_dir: outputs/cross_city_multisource_tokyo_tabular_vrex/reports
+seed: 42
+device: auto
+models: [opencarbon_monthly_precomputed, opencarbon_monthly_vrex]
+training:
+  poi_input_mode: tabular
+  representation_dim: 128
+  dropout: 0.2
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  max_epochs: 25
+  contrastive_warmup_epochs: 5
+  contrastive_weight: 0.01
+  invariance_weight: 1.0
+  invariance_warmup_epochs: 2
+  environment_key: city_id
+  patience: 8
+  batch_size: 36
+  gradient_accumulation: 2
+  amp: true
+  num_workers: 0
+  temperature: 0.07
+  record_train_r2: true

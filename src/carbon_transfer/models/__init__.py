@@ -1,7 +1,13 @@
 from .bpnn import BPNN
 from .carbongcn import CarbonGCN, GraphConvolution
 from .common import MLPEncoder, ModalityAttention, contrastive_loss
-from .opencarbon import NeighborhoodAggregator, OpenCarbonModel, POIEncoder, SEModule
+from .opencarbon import (
+    MeanMLPGatedNeighborhoodAggregator,
+    NeighborhoodAggregator,
+    OpenCarbonModel,
+    POIEncoder,
+    SEModule,
+)
 
 __all__ = [
     "BPNN",
@@ -9,6 +15,7 @@ __all__ = [
     "GraphConvolution",
     "MLPEncoder",
     "ModalityAttention",
+    "MeanMLPGatedNeighborhoodAggregator",
     "NeighborhoodAggregator",
     "OpenCarbonModel",
     "POIEncoder",

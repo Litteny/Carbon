@@ -1,0 +1,29 @@
+data_config: configs/data.yaml
+experiment_config: configs/experiments.yaml
+panel_file: data/features/grid_month_panel.parquet
+neighbors_file: data/features/neighbors.parquet
+poi_dir: data/features/poi_sparse
+poi_embedding_dir: data/features/poi_embeddings/cross_city_chicago_to_tokyo_attention_seed_42
+poi_embedding_checkpoint_template: outputs/opencarbon_attention/runs/cross_city_chicago_to_tokyo/{fold}/opencarbon_monthly/seed_{seed}/best.pt
+split_dir: data/splits
+split_experiment: cross_city_chicago_to_tokyo
+artifact_dir: outputs/opencarbon_precomputed_no_contrastive/runs
+report_dir: outputs/opencarbon_precomputed_no_contrastive/reports/cross_city_chicago_to_tokyo
+seed: 42
+device: auto
+models: [opencarbon_monthly]
+training:
+  poi_input_mode: precomputed
+  representation_dim: 128
+  dropout: 0.2
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  max_epochs: 25
+  contrastive_warmup_epochs: 2
+  contrastive_weight: 0.0
+  patience: 5
+  batch_size: 16
+  gradient_accumulation: 2
+  amp: true
+  num_workers: 2
+  temperature: 0.07

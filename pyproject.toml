@@ -8,6 +8,9 @@ version = "0.1.0"
 description = "Cross-city and cross-region monthly carbon transfer experiments"
 requires-python = ">=3.9"
 
+[project.scripts]
+carbon = "carbon_transfer.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["carbon_transfer*"]

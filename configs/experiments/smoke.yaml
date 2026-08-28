@@ -1,0 +1,32 @@
+data_config: configs/data.yaml
+experiment_config: configs/experiments.yaml
+panel_file: data/features/grid_month_panel.parquet
+neighbors_file: data/features/neighbors.parquet
+poi_dir: data/features/poi_sparse
+split_dir: data/splits
+artifact_dir: outputs/smoke/runs
+seed: 42
+device: auto
+smoke_max_rows_per_split: 64
+models:
+- lightgbm
+- bpnn
+- carbongcn
+- opencarbon_core
+- opencarbon_monthly
+- opencarbon_monthly_noviirs
+training:
+  representation_dim: 32
+  dropout: 0.2
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  max_epochs: 1
+  contrastive_warmup_epochs: 2
+  contrastive_weight: 0.1
+  patience: 1
+  batch_size: 2
+  gradient_accumulation: 1
+  amp: false
+  num_workers: 0
+  temperature: 0.07
+report_dir: outputs/smoke/reports

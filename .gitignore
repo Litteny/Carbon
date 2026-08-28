@@ -3,9 +3,9 @@
 /data/
 
 # Experiment outputs and reports
-/artifacts/
-/artifacts_smoke/
+/artifacts*/
 /reports/
+/outputs/
 /dist/
 /.tools/
 *.log
@@ -25,6 +25,7 @@ venv/
 /.agents/
 .DS_Store
 Thumbs.db
+/屏幕截图 2026-08-04 160322.png
 
 # Local secrets
 .env

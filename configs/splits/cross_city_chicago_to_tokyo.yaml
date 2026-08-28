@@ -1,0 +1,7 @@
+experiment: cross_city_chicago_to_tokyo
+panel_file: data/features/grid_month_panel.parquet
+split_dir: data/splits
+fold_id: chicago_train_nyc_singapore_validation_tokyo_test
+train_cities: [chicago]
+validation_cities: [nyc, singapore]
+test_cities: [tokyo]

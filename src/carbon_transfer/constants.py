@@ -35,4 +35,5 @@ ENVIRONMENT_FEATURES = WEATHER_COLUMNS
 MODEL_NAMES = [
     "lightgbm", "bpnn", "carbongcn", "opencarbon_core",
     "opencarbon_monthly", "opencarbon_monthly_noviirs",
+    "opencarbon_monthly_precomputed", "opencarbon_monthly_vrex",
 ]

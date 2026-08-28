@@ -9,11 +9,18 @@ from carbon_transfer.datasets import (
     SparsePOIStore, fixed_neighborhood_indices, masked_edges, normalized_adjacency,
 )
 from carbon_transfer.metrics import calculate_metrics
-from carbon_transfer.models import BPNN, CarbonGCN, NeighborhoodAggregator, OpenCarbonModel, POIEncoder
+from carbon_transfer.models import (
+    BPNN,
+    CarbonGCN,
+    MeanMLPGatedNeighborhoodAggregator,
+    NeighborhoodAggregator,
+    OpenCarbonModel,
+    POIEncoder,
+)
 from carbon_transfer.models.bpnn import BPNN as SplitBPNN
 from carbon_transfer.models.carbongcn import CarbonGCN as SplitCarbonGCN
 from carbon_transfer.models.opencarbon import OpenCarbonModel as SplitOpenCarbonModel
-from carbon_transfer.training import _open_carbon_feature_sets
+from carbon_transfer.training import _open_carbon_feature_sets, _validate_neighborhood_aggregation
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +66,58 @@ def test_open_carbon_forward_shape():
     assert output.shape == (2,)
     assert poi.shape == remote.shape == (2, 16)
 
+
+def test_mean_mlp_gate_uses_masked_mean_including_center():
+    aggregator = MeanMLPGatedNeighborhoodAggregator(representation_dim=2, dropout=0.0).eval()
+    with torch.no_grad():
+        first = aggregator.neighborhood_mlp[0]
+        second = aggregator.neighborhood_mlp[3]
+        first.weight.copy_(torch.eye(2))
+        first.bias.zero_()
+        second.weight.copy_(torch.eye(2))
+        second.bias.zero_()
+        aggregator.gate.weight.zero_()
+        aggregator.gate.bias.zero_()
+    nodes = torch.tensor([[2.0, 4.0], [6.0, 8.0], [100.0, 100.0]])
+    indices = torch.tensor([[2, 2, 2, 2, 0, 1, 2, 2, 2]])
+    mask = torch.tensor([[False, False, False, False, True, True, False, False, False]])
+    center, fused = aggregator(nodes, indices, mask)
+    assert torch.equal(center, torch.tensor([[2.0, 4.0]]))
+    assert torch.allclose(fused, torch.tensor([[3.0, 5.0]]))
+
+
+def test_mean_mlp_gate_masked_slots_do_not_affect_result():
+    aggregator = MeanMLPGatedNeighborhoodAggregator(representation_dim=4, dropout=0.0).eval()
+    nodes = torch.randn(3, 4)
+    mask = torch.tensor([[False, False, False, False, True, True, False, False, False]])
+    first = torch.tensor([[1, 1, 1, 1, 0, 1, 1, 1, 1]])
+    second = torch.tensor([[2, 2, 2, 2, 0, 1, 2, 2, 2]])
+    with torch.no_grad():
+        _, first_result = aggregator(nodes, first, mask)
+        _, second_result = aggregator(nodes, second, mask)
+    assert torch.allclose(first_result, second_result)
+
+
+def test_open_carbon_selects_aggregation_and_rejects_unknown_value():
+    mean_model = OpenCarbonModel(8, 6, 16, neighborhood_aggregation="mean_mlp_gate")
+    assert isinstance(mean_model.neighborhood_aggregator, MeanMLPGatedNeighborhoodAggregator)
+    try:
+        OpenCarbonModel(8, 6, 16, neighborhood_aggregation="unknown")
+    except ValueError as error:
+        assert "Unknown neighborhood_aggregation" in str(error)
+    else:
+        raise AssertionError("unknown neighborhood aggregation was accepted")
+
+
+def test_neighborhood_aggregation_checkpoint_compatibility():
+    _validate_neighborhood_aggregation({}, "spatial_attention")
+    _validate_neighborhood_aggregation({"neighborhood_aggregation": "mean_mlp_gate"}, "mean_mlp_gate")
+    try:
+        _validate_neighborhood_aggregation({}, "mean_mlp_gate")
+    except ValueError as error:
+        assert "spatial_attention" in str(error)
+    else:
+        raise AssertionError("legacy checkpoint was accepted for mean_mlp_gate")
 
 def test_masked_neighborhood_slots_do_not_affect_context():
     aggregator = NeighborhoodAggregator(representation_dim=8, dropout=0.0).eval()
