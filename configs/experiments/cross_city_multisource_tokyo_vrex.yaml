@@ -14,9 +14,10 @@ device: auto
 models: [opencarbon_monthly_precomputed, opencarbon_monthly_vrex]
 training:
   representation_dim: 128
+  dropout: 0.2
   learning_rate: 0.0003
   weight_decay: 0.0001
-  max_epochs: 25
+  max_epochs: 60
   contrastive_warmup_epochs: 5
   contrastive_weight: 0.01
   invariance_weight: 1.0

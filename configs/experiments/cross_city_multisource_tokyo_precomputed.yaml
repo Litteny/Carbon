@@ -15,6 +15,7 @@ models: [opencarbon_monthly]
 training:
   poi_input_mode: precomputed
   representation_dim: 128
+  dropout: 0.2
   learning_rate: 0.0003
   weight_decay: 0.0001
   max_epochs: 25
