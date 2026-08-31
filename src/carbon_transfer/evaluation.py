@@ -461,6 +461,7 @@ def aggregate_three_year_cross_region_runs(
             yearly_frames.append(pd.read_csv(yearly_path).assign(
                 city_id=identity["city_id"], fold_id=identity["fold_id"],
                 model=identity["model"], seed=identity["seed"],
+                test_grids=int(predictions["cell_id"].nunique()),
             ))
         for filename, destination in (
             ("metrics_by_admin_monthly.csv", admin_monthly_frames),
@@ -478,6 +479,24 @@ def aggregate_three_year_cross_region_runs(
     results.to_csv(report_dir / "three_year_results.csv", index=False)
     yearly = pd.concat(yearly_frames, ignore_index=True) if yearly_frames else pd.DataFrame()
     yearly.to_csv(report_dir / "three_year_yearly.csv", index=False)
+    (
+        year_city_summary,
+        year_seed_macro,
+        year_seed_weighted,
+        year_summary,
+    ) = _summarize_three_year_yearly(yearly, metric_names)
+    year_city_summary.to_csv(
+        report_dir / "three_year_year_city_summary.csv", index=False,
+    )
+    year_seed_macro.to_csv(
+        report_dir / "three_year_year_seed_macro.csv", index=False,
+    )
+    year_seed_weighted.to_csv(
+        report_dir / "three_year_year_seed_grid_weighted.csv", index=False,
+    )
+    year_summary.to_csv(
+        report_dir / "three_year_year_summary.csv", index=False,
+    )
     if admin_monthly_frames:
         pd.concat(admin_monthly_frames, ignore_index=True).to_csv(
             report_dir / "three_year_admin_monthly.csv", index=False,
@@ -546,6 +565,22 @@ def aggregate_three_year_cross_region_runs(
         "overall_city_macro": overall,
     }
     write_json(report_dir / "three_year_summary.json", summary)
+    yearly_summary = {
+        "experiment": experiment_name,
+        "metric_scope": "monthly_metrics_averaged_within_each_year",
+        "city_aggregation": "equal_weight_macro_average",
+        "years": {
+            str(row["year"]): {
+                metric: {
+                    "mean": float(row[f"{metric}_mean"]),
+                    "std_across_seeds": float(row[f"{metric}_std_seeds"]),
+                }
+                for metric in metric_names
+            }
+            for row in year_summary.to_dict("records")
+        },
+    }
+    write_json(report_dir / "three_year_year_summary.json", yearly_summary)
     lines = [
         "# 2021-2023 three-year cross-region experiment", "",
         f"Completed runs: **{len(results)} / {expected_runs}**", "",
@@ -554,9 +589,76 @@ def aggregate_three_year_cross_region_runs(
         lines.extend([
             "## Per-city mean and standard deviation", "", _markdown_table(city_summary), "",
             "## Four-city macro average by seed", "", _markdown_table(seed_summary), "",
+            "## Per-year overall summary", "", _markdown_table(year_summary), "",
+            "## Per-year and city summary", "", _markdown_table(year_city_summary), "",
+            "## Per-year and seed macro average", "", _markdown_table(year_seed_macro), "",
             "## Per-year run metrics", "", _markdown_table(yearly),
         ])
     (report_dir / "three_year_report.md").write_text(
         "\n".join(lines) + "\n", encoding="utf-8",
     )
     return summary
+
+
+def _summarize_three_year_yearly(
+    yearly: pd.DataFrame,
+    metric_names: Sequence[str],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Summarize per-run yearly metrics by city, seed, and year."""
+    if yearly.empty:
+        empty = pd.DataFrame()
+        return empty, empty.copy(), empty.copy(), empty.copy()
+    required = {"year", "city_id", "seed", "test_grids"}
+    required.update(f"{metric}_mean" for metric in metric_names)
+    missing = sorted(required - set(yearly.columns))
+    if missing:
+        raise ValueError(f"Three-year yearly metrics missing columns: {', '.join(missing)}")
+
+    year_city_rows = []
+    for (year, city_id), group in yearly.groupby(["year", "city_id"], sort=True):
+        row = {
+            "year": str(year),
+            "city_id": city_id,
+            "runs": int(len(group)),
+            "test_grids_mean": float(group["test_grids"].mean()),
+        }
+        for metric in metric_names:
+            values = group[f"{metric}_mean"]
+            row[f"{metric}_mean"] = values.mean(skipna=True)
+            row[f"{metric}_std_seeds"] = values.std(skipna=True, ddof=1)
+        year_city_rows.append(row)
+    year_city_summary = pd.DataFrame(year_city_rows)
+
+    macro_rows = []
+    weighted_rows = []
+    for (year, seed), group in yearly.groupby(["year", "seed"], sort=True):
+        macro = {"year": str(year), "seed": int(seed), "cities": int(len(group))}
+        weighted = dict(macro)
+        weights = group["test_grids"].to_numpy(dtype=float)
+        for metric in metric_names:
+            values = group[f"{metric}_mean"].to_numpy(dtype=float)
+            valid = pd.notna(values)
+            macro[metric] = float(pd.Series(values).mean(skipna=True))
+            weighted[metric] = (
+                float((values[valid] * weights[valid]).sum() / weights[valid].sum())
+                if valid.any() else None
+            )
+        macro_rows.append(macro)
+        weighted_rows.append(weighted)
+    year_seed_macro = pd.DataFrame(macro_rows)
+    year_seed_weighted = pd.DataFrame(weighted_rows)
+
+    year_rows = []
+    for year, group in year_seed_macro.groupby("year", sort=True):
+        row = {"year": str(year), "seeds": int(len(group))}
+        for metric in metric_names:
+            values = group[metric]
+            row[f"{metric}_mean"] = values.mean(skipna=True)
+            row[f"{metric}_std_seeds"] = values.std(skipna=True, ddof=1)
+        year_rows.append(row)
+    return (
+        year_city_summary,
+        year_seed_macro,
+        year_seed_weighted,
+        pd.DataFrame(year_rows),
+    )

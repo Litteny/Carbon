@@ -3,6 +3,7 @@ from pathlib import Path
 import pandas as pd
 
 from carbon_transfer.config import load_config
+from carbon_transfer.evaluation import _summarize_three_year_yearly
 from carbon_transfer.experiments import discover_tasks
 from carbon_transfer.metrics import calculate_yearly_metrics
 
@@ -64,3 +65,32 @@ def test_yearly_metrics_preserve_three_years_and_month_counts():
     assert yearly["year"].tolist() == ["2021", "2022", "2023"]
     assert yearly["months"].eq(12).all()
     assert yearly["n"].eq(120).all()
+
+
+def test_yearly_protocol_summary_uses_city_macro_then_seed_statistics():
+    rows = []
+    for year in ("2021", "2022", "2023"):
+        for seed in (42, 43, 44):
+            rows.extend([
+                {
+                    "year": year, "city_id": "small", "seed": seed,
+                    "test_grids": 10, "log_mae_mean": float(seed - 41),
+                },
+                {
+                    "year": year, "city_id": "large", "seed": seed,
+                    "test_grids": 30, "log_mae_mean": float(seed - 39),
+                },
+            ])
+    city, macro, weighted, summary = _summarize_three_year_yearly(
+        pd.DataFrame(rows), ["log_mae"],
+    )
+    assert len(city) == 6
+    assert len(macro) == len(weighted) == 9
+    assert len(summary) == 3
+    seed_42 = macro[(macro["year"] == "2021") & (macro["seed"] == 42)].iloc[0]
+    weighted_42 = weighted[
+        (weighted["year"] == "2021") & (weighted["seed"] == 42)
+    ].iloc[0]
+    assert seed_42["log_mae"] == 2.0
+    assert weighted_42["log_mae"] == 2.5
+    assert summary.set_index("year").loc["2021", "log_mae_mean"] == 3.0
