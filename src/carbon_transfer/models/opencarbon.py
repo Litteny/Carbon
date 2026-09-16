@@ -147,7 +147,10 @@ class OpenCarbonModel(nn.Module):
         else:
             raise ValueError(f"Unknown poi_input_mode={poi_input_mode}")
         self.remote_encoder = MLPEncoder(remote_dim, representation_dim, dropout)
-        self.environment_encoder = MLPEncoder(environment_dim, representation_dim, dropout)
+        self.environment_encoder = (
+            MLPEncoder(environment_dim, representation_dim, dropout)
+            if environment_dim > 0 else None
+        )
         self.modality_attention = ModalityAttention(representation_dim)
         aggregators = {
             "spatial_attention": NeighborhoodAggregator,
@@ -176,10 +179,10 @@ class OpenCarbonModel(nn.Module):
         neighborhood_mask: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         remote_representation = self.remote_encoder(remote)
-        environment_representation = self.environment_encoder(environment)
-        grid_representation = self.modality_attention([
-            poi_representation, remote_representation, environment_representation,
-        ])
+        representations = [poi_representation, remote_representation]
+        if self.environment_encoder is not None:
+            representations.append(self.environment_encoder(environment))
+        grid_representation = self.modality_attention(representations)
         center_representation, neighborhood_representation = self.neighborhood_aggregator(
             grid_representation, neighborhood_indices, neighborhood_mask,
         )

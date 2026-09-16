@@ -46,6 +46,9 @@ def _protocol_for_experiment(experiment: str) -> str:
 
 
 def _seeds_for_fold(config: Dict, fold: str) -> List[int]:
+    if config.get("independent_training_seeds"):
+        values = config.get("training_seeds", config.get("seeds", [42]))
+        return [int(value) for value in values]
     if "seeds" not in config:
         return [int(config.get("seed", 42))]
     match = re.search(r"_split_seed_(\d+)$", fold)
@@ -76,11 +79,16 @@ def discover_tasks(
         protocol = _protocol_for_experiment(experiment)
         for manifest_path in sorted(root.glob("*.parquet")):
             fold = manifest_path.stem
+            fixed_split_seed = config.get("fixed_split_seed")
+            if fixed_split_seed is not None:
+                match = re.search(r"_split_seed_(\d+)$", fold)
+                if match and int(match.group(1)) != int(fixed_split_seed):
+                    continue
             if selected_folds and fold not in selected_folds:
                 continue
             configured_fold_seeds = _seeds_for_fold(config, fold)
             if re.search(r"_split_seed_(\d+)$", fold):
-                selected_seed_values = {int(value) for value in seeds} if seeds else None
+                selected_seed_values = ({int(value) for value in seeds} if seeds else None)
                 fold_seeds = [
                     value for value in configured_fold_seeds
                     if selected_seed_values is None or value in selected_seed_values

@@ -1,0 +1,31 @@
+experiment: annual_cross_region_2022
+year: "2022"
+cities: [chicago, nyc, singapore, tokyo]
+fixed_split_seed: 42
+split_experiment: annual_cross_region_2022
+panel_file: data/features/grid_month_panel.parquet
+neighbors_file: data/features/neighbors.parquet
+poi_dir: data/features/poi_sparse
+poi_cache_size: 12
+split_dir: data/splits
+artifact_dir: outputs/annual_cross_region_2022_input_ablation/runs
+report_dir: outputs/annual_cross_region_2022_input_ablation/reports
+seeds: [42]
+models: [opencarbon_monthly]
+device: auto
+training:
+  representation_dim: 128
+  dropout: 0.2
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  max_epochs: 25
+  contrastive_warmup_epochs: 2
+  contrastive_weight: 0.1
+  patience: 5
+  batch_size: 16
+  gradient_accumulation: 2
+  amp: true
+  num_workers: 2
+  persistent_workers: true
+  prefetch_factor: 2
+  temperature: 0.07

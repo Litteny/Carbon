@@ -214,6 +214,7 @@ class OpenCarbonDataset(Dataset):
         poi_cache_size: int = 4,
         environment_mapping: Optional[Mapping[str, int]] = None,
         environment_key: str = "city_id",
+        zero_poi: bool = False,
     ) -> None:
         self.frame = frame.reset_index(drop=True)
         self.remote = remote.astype(np.float32, copy=False)
@@ -239,6 +240,7 @@ class OpenCarbonDataset(Dataset):
         ], dtype=np.int64)
         self.unknown_environments = unknown
         self.poi_store = SparsePOIStore(poi_root, cache_size=poi_cache_size)
+        self.zero_poi = bool(zero_poi)
 
     def __len__(self) -> int:
         return len(self.frame)
@@ -261,7 +263,12 @@ class OpenCarbonDataset(Dataset):
         poi = []
         for index in unique_indices:
             row = self.frame.iloc[int(index)]
-            poi.append(self.poi_store.dense(row["city_id"], str(row["period"]), row["cell_id"]))
+            poi.append(
+                np.zeros((17, 256, 256), dtype=np.float32)
+                if self.zero_poi else self.poi_store.dense(
+                    row["city_id"], str(row["period"]), row["cell_id"]
+                )
+            )
         return {
             "poi": torch.from_numpy(np.stack(poi)),
             "remote": torch.from_numpy(self.remote[unique_indices]),

@@ -1,0 +1,36 @@
+experiment: annual_cross_region_2022
+year: "2022"
+cities: [nyc, tokyo]
+split_seeds: [42]
+split_ratios: [0.7, 0.2, 0.1]
+panel_file: data/features/grid_month_panel.parquet
+neighbors_file: data/features/neighbors.parquet
+poi_dir: data/features/poi_sparse
+poi_cache_size: 12
+split_dir: data/splits
+split_experiment: annual_cross_region_2022
+fixed_split_seed: 42
+artifact_dir: outputs/annual_cross_region_poi_modis_2022/runs
+report_dir: outputs/annual_cross_region_poi_modis_2022/reports
+models: [opencarbon_core]
+independent_training_seeds: true
+training_seeds: [42, 43, 44]
+device: auto
+training:
+  input_scope: poi_modis
+  poi_input_mode: dense
+  representation_dim: 128
+  dropout: 0.2
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  max_epochs: 25
+  contrastive_warmup_epochs: 2
+  contrastive_weight: 0.1
+  patience: 5
+  batch_size: 16
+  gradient_accumulation: 2
+  amp: true
+  num_workers: 2
+  persistent_workers: true
+  prefetch_factor: 2
+  temperature: 0.07

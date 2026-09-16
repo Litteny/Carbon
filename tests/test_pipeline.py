@@ -20,7 +20,7 @@ from carbon_transfer.models import (
 from carbon_transfer.models.bpnn import BPNN as SplitBPNN
 from carbon_transfer.models.carbongcn import CarbonGCN as SplitCarbonGCN
 from carbon_transfer.models.opencarbon import OpenCarbonModel as SplitOpenCarbonModel
-from carbon_transfer.training import _open_carbon_feature_sets, _validate_neighborhood_aggregation
+from carbon_transfer.training import _open_carbon_feature_sets, _open_carbon_features_for_scope, _validate_neighborhood_aggregation
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,6 +65,17 @@ def test_open_carbon_forward_shape():
     )
     assert output.shape == (2,)
     assert poi.shape == remote.shape == (2, 16)
+
+
+def test_poi_modis_scope_excludes_environment_and_viirs():
+    remote, environment = _open_carbon_features_for_scope("opencarbon_core", "poi_modis")
+    assert remote == [
+        "modis_ndvi_mean", "modis_ndvi_mean_pixel_count", "modis_evi_mean",
+        "modis_evi_mean_pixel_count", "modis_red_reflectance_mean",
+        "modis_red_reflectance_mean_pixel_count", "modis_nir_reflectance_mean",
+        "modis_nir_reflectance_mean_pixel_count",
+    ]
+    assert environment == []
 
 
 def test_mean_mlp_gate_uses_masked_mean_including_center():

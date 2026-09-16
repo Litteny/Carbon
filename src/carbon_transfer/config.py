@@ -30,6 +30,7 @@ class TrainingConfig:
     invariance_warmup_epochs: int = 2
     environment_key: str = "city_id"
     poi_input_mode: str = "dense"
+    input_scope: str = "default"
     record_train_r2: bool = False
 
 

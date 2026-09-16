@@ -437,7 +437,7 @@ def _train_gcn(
         return model(tensors["test"], adjacency["test"]).cpu().numpy()
 
 
-def _open_carbon_feature_sets(model_name: str) -> Tuple[List[str], List[str]]:
+def _open_carbon_feature_sets(model_name: str, ablation: str = "baseline") -> Tuple[List[str], List[str]]:
     no_viirs = model_name == "opencarbon_monthly_noviirs"
     monthly = model_name != "opencarbon_core"
     remote = MODIS_COLUMNS + [f"{name}_is_missing" for name in MODIS_COLUMNS]
@@ -446,7 +446,35 @@ def _open_carbon_feature_sets(model_name: str) -> Tuple[List[str], List[str]]:
     environment = WEATHER_COLUMNS + [f"{name}_is_missing" for name in WEATHER_COLUMNS]
     if monthly:
         environment += MONTH_COLUMNS
+    if ablation == "no_modis":
+        remote = [name for name in remote if name not in MODIS_COLUMNS and name not in {
+            f"{value}_is_missing" for value in MODIS_COLUMNS
+        }]
+    elif ablation == "no_viirs":
+        remote = [name for name in remote if name not in VIIRS_COLUMNS]
+    elif ablation == "no_weather":
+        environment = [name for name in environment if name not in WEATHER_COLUMNS and name not in {
+            f"{value}_is_missing" for value in WEATHER_COLUMNS
+        }]
+    elif ablation == "no_month":
+        environment = [name for name in environment if name not in MONTH_COLUMNS]
+    elif ablation not in {"baseline", "no_poi"}:
+        raise ValueError(f"Unknown input_ablation={ablation!r}")
     return remote, environment
+
+
+def _open_carbon_features_for_scope(
+    model_name: str, scope: str, ablation: str = "baseline",
+) -> Tuple[List[str], List[str]]:
+    """Return explicitly scoped OpenCarbon inputs for protocol-level experiments."""
+    if scope == "poi_modis":
+        remote = list(MODIS_COLUMNS)
+        if ablation == "no_poi":
+            return remote, []
+        if ablation != "baseline":
+            raise ValueError(f"Unknown input_ablation={ablation!r}")
+        return remote, []
+    return _open_carbon_feature_sets(model_name, ablation)
 
 
 def _open_carbon_poi_input_mode(
@@ -484,7 +512,11 @@ def _train_open_carbon(
     environment_mapping = (
         _environment_mapping(frames["train"], environment_key) if is_vrex else {}
     )
-    remote_columns, environment_columns = _open_carbon_feature_sets(model_name)
+    input_ablation = str(settings.get("input_ablation", "baseline"))
+    input_scope = str(settings.get("input_scope", "default"))
+    remote_columns, environment_columns = _open_carbon_features_for_scope(
+        model_name, input_scope, input_ablation,
+    )
     poi_input_mode = str(settings.get("poi_input_mode", "dense"))
     feature_columns = (
         POI_COLUMNS + remote_columns + environment_columns
@@ -506,6 +538,7 @@ def _train_open_carbon(
         "environment_key": environment_key if is_vrex else None,
         "environment_mapping": environment_mapping,
         "poi_input_mode": str(settings.get("poi_input_mode", "dense")),
+        "input_scope": input_scope,
     }, run_dir / "preprocessor.joblib")
     poi_size = len(POI_COLUMNS)
     remote_size = len(remote_columns)
@@ -555,6 +588,7 @@ def _train_open_carbon(
                 poi_cache_size=int(config.get("poi_cache_size", 4)),
                 environment_mapping=environment_mapping,
                 environment_key=environment_key,
+                zero_poi=input_ablation == "no_poi",
             )
     num_workers = int(settings.get("num_workers", 0))
     worker_options = {}
@@ -922,6 +956,8 @@ def train_run(config: Dict, fold_id: str, model_name: str, seed: int = 42, force
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "config": deepcopy(config),
     }
+    if model_name.startswith("opencarbon_"):
+        metadata["input_ablation"] = str(settings.get("input_ablation", "baseline"))
     if uses_precomputed_poi:
         missing = [
             key for key in ("poi_embedding_dir", "poi_embedding_checkpoint_template")
