@@ -1,3 +1,6 @@
+from pathlib import Path
+
+from carbon_transfer.config import load_config
 from carbon_transfer.constants import (
     STAGE1_B0_MODEL,
     STAGE1_M1_MODEL,
@@ -6,6 +9,24 @@ from carbon_transfer.constants import (
 )
 from carbon_transfer.models.registry import list_model_ids
 from carbon_transfer.within_city_grid import _split_grid_ids
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_chicago_singapore_supplement_config_is_isolated():
+    config = load_config(
+        ROOT / "configs/experiments/stage1_within_city_grid_chicago_singapore.yaml"
+    )
+
+    assert config["cities"] == ["chicago", "singapore"]
+    assert config["split_experiment"] == config["experiment"]
+    assert config["artifact_dir"].endswith(
+        "stage1_within_city_grid_chicago_singapore_2021_2023/runs"
+    )
+    assert config["report_dir"].endswith(
+        "stage1_within_city_grid_chicago_singapore_2021_2023/reports"
+    )
 
 
 def test_stage1_models_are_registered_and_use_fixed_feature_schema():

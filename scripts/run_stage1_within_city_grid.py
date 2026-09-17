@@ -15,7 +15,8 @@ from carbon_transfer.models.registry import list_model_ids
 
 
 DEFAULT_CONFIG = "configs/experiments/stage1_within_city_grid.yaml"
-EXPERIMENT = "stage1_within_city_grid_2021_2023"
+DEFAULT_EXPERIMENT = "stage1_within_city_grid_2021_2023"
+EXPERIMENT_PREFIX = "stage1_within_city_grid"
 CITY_ALIASES = {
     "chicago": "chicago",
     "nyc": "nyc",
@@ -79,7 +80,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         apply_run_namespace(config, args.run_name)
     except ValueError as error:
         parser.error(str(error))
-    config["split_experiment"] = EXPERIMENT
+    experiment = str(config.get("experiment", DEFAULT_EXPERIMENT))
+    if not experiment.startswith(EXPERIMENT_PREFIX):
+        parser.error(
+            "Stage1 within-city grid experiment names must start with "
+            f"{EXPERIMENT_PREFIX}"
+        )
+    config["split_experiment"] = experiment
     configured_models = set(str(value) for value in config.get("models", []))
     if not configured_models or not configured_models.issubset(set(STAGE1_MODEL_NAMES)):
         parser.error(
@@ -113,10 +120,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         config,
         models=args.models,
         seeds=args.seeds,
-        experiments=[EXPERIMENT],
+        experiments=[experiment],
     )
     if not protocol_tasks:
-        parser.error(f"No tasks found for {EXPERIMENT}; build split manifests first")
+        parser.error(f"No tasks found for {experiment}; build split manifests first")
 
     cities = _selected_cities(args.cities)
     selected_tasks = [
@@ -134,7 +141,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     if args.evaluate_only:
         aggregate_for_config(config, protocol_tasks)
-        print(f"aggregated experiment={EXPERIMENT} tasks={len(protocol_tasks)}")
+        print(f"aggregated experiment={experiment} tasks={len(protocol_tasks)}")
         return 0
 
     return run_experiment(

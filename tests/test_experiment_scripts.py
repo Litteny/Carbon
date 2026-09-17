@@ -99,6 +99,38 @@ def test_stage1_cross_city_dry_run_filters_alias_model_and_seed(capsys):
     assert "tasks=1" in output
 
 
+def test_stage1_within_city_grid_accepts_configured_supplement_experiment(monkeypatch):
+    module = load_script("run_stage1_within_city_grid")
+    captured = {}
+
+    def fake_discover_tasks(config, **kwargs):
+        captured["config"] = config
+        captured["kwargs"] = kwargs
+        return [
+            ExperimentTask(
+                "stage1_within_city_grid_chicago_singapore_2021_2023",
+                "stage1_within_city_grid",
+                "2021-2023_chicago_grid_fixed",
+                "opencarbon_stage1_b0",
+                42,
+                Path("manifest.parquet"),
+            )
+        ]
+
+    monkeypatch.setattr(module, "discover_tasks", fake_discover_tasks)
+    assert module.main([
+        "--config",
+        "configs/experiments/stage1_within_city_grid_chicago_singapore.yaml",
+        "--dry-run",
+    ]) == 0
+    assert captured["config"]["split_experiment"] == (
+        "stage1_within_city_grid_chicago_singapore_2021_2023"
+    )
+    assert captured["kwargs"]["experiments"] == [
+        "stage1_within_city_grid_chicago_singapore_2021_2023"
+    ]
+
+
 def test_training_counts_must_be_positive():
     module = load_script("run_stage1_cross_city")
     with pytest.raises(SystemExit):

@@ -290,8 +290,12 @@ def aggregate_stage1_within_city_grid_runs(
     city_summary.to_csv(report_dir / "stage1_city_summary.csv", index=False)
     city_grid_weighted.to_csv(report_dir / "stage1_city_grid_weighted.csv", index=False)
     seed_city_macro.to_csv(report_dir / "stage1_seed_city_macro.csv", index=False)
+    experiment_name = (
+        str(results["experiment"].iloc[0])
+        if not results.empty else "stage1_within_city_grid"
+    )
     summary = {
-        "experiment": "stage1_within_city_grid_2021_2023",
+        "experiment": experiment_name,
         "expected_runs": int(expected_runs),
         "completed_runs": int(len(results)),
         "primary_metric": "paired_log_mae_delta_m1_minus_b0",
