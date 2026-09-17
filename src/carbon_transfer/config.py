@@ -11,6 +11,7 @@ import yaml
 @dataclass(frozen=True)
 class TrainingConfig:
     representation_dim: int = 128
+    time_embedding_dim: int = 32
     dropout: float = 0.2
     learning_rate: float = 0.001
     weight_decay: float = 0.0001
@@ -88,9 +89,9 @@ def validate_experiment_config(config: Mapping[str, Any]) -> ExperimentConfig:
     if missing:
         raise ValueError(f"Missing experiment config keys: {', '.join(missing)}")
     training = TrainingConfig(**dict(config.get("training", {})))
-    if training.poi_input_mode not in {"dense", "precomputed", "tabular"}:
+    if training.poi_input_mode not in {"dense", "precomputed", "tabular", "none"}:
         raise ValueError(
-            "training.poi_input_mode must be 'dense', 'precomputed', or 'tabular'"
+            "training.poi_input_mode must be 'dense', 'precomputed', 'tabular', or 'none'"
         )
     if training.poi_input_mode == "precomputed":
         required_embedding = [

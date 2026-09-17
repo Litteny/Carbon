@@ -1,0 +1,40 @@
+experiment: stage1_within_city_grid_2021_2023
+years: ["2021", "2022", "2023"]
+cities: [nyc, tokyo]
+split_seed: 2026
+split_ratios: [0.7, 0.2, 0.1]
+
+panel_file: data/features/grid_month_panel.parquet
+neighbors_file: data/features/neighbors.parquet
+poi_dir: data/features/poi_sparse
+poi_input_mode: none
+split_dir: data/splits
+split_experiment: stage1_within_city_grid_2021_2023
+
+artifact_dir: outputs/stage1_within_city_grid_attention/runs
+report_dir: outputs/stage1_within_city_grid_attention/reports
+seeds: [42]
+device: auto
+models:
+  - opencarbon_stage1_b0
+  - opencarbon_stage1_m1
+
+training:
+  representation_dim: 128
+  time_embedding_dim: 32
+  dropout: 0.2
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  max_epochs: 25
+  contrastive_warmup_epochs: 0
+  contrastive_weight: 0.0
+  patience: 5
+  batch_size: 16
+  gradient_accumulation: 2
+  amp: true
+  num_workers: 0
+  persistent_workers: false
+  prefetch_factor: 2
+  neighborhood_aggregation: spatial_attention
+  poi_input_mode: none
+  input_scope: stage1

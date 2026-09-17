@@ -154,6 +154,69 @@ def fixed_neighborhood_indices(frame: pd.DataFrame, neighbors: pd.DataFrame) -> 
     return output
 
 
+class Stage1OpenCarbonDataset(Dataset):
+    """Target-split dataset with label-free context from the complete city panel."""
+
+    def __init__(
+        self,
+        target_frame: pd.DataFrame,
+        full_frame: pd.DataFrame,
+        features: np.ndarray,
+        period_ids: np.ndarray,
+        neighborhoods: np.ndarray,
+    ) -> None:
+        self.target_frame = target_frame.reset_index(drop=True)
+        self.full_frame = full_frame.reset_index(drop=True)
+        self.features = features.astype(np.float32, copy=False)
+        self.period_ids = period_ids.astype(np.int64, copy=False)
+        self.neighborhoods = neighborhoods.astype(np.int64, copy=False)
+        if len(self.full_frame) != len(self.features):
+            raise ValueError("Stage1 context features must align with the full frame")
+        if len(self.full_frame) != len(self.period_ids):
+            raise ValueError("Stage1 period IDs must align with the full frame")
+        if self.neighborhoods.shape != (len(self.full_frame), 9):
+            raise ValueError("Stage1 neighborhoods must have shape [full_rows, 9]")
+        lookup = {
+            (str(row.city_id), str(row.period), str(row.cell_id)): index
+            for index, row in self.full_frame.iterrows()
+        }
+        target_indices = []
+        for row in self.target_frame.itertuples():
+            key = (str(row.city_id), str(row.period), str(row.cell_id))
+            if key not in lookup:
+                raise ValueError(f"Target row is absent from full context: {key}")
+            target_indices.append(lookup[key])
+        self.target_indices = np.asarray(target_indices, dtype=np.int64)
+        self.targets = self.target_frame["log1p_emission"].to_numpy(dtype=np.float32)
+
+    def __len__(self) -> int:
+        return len(self.target_frame)
+
+    def __getitem__(self, index: int) -> int:
+        return int(index)
+
+    def collate(self, indices: Sequence[int]) -> Dict[str, torch.Tensor]:
+        target_positions = np.asarray(indices, dtype=np.int64)
+        target_indices = self.target_indices[target_positions]
+        neighborhoods = self.neighborhoods[target_indices]
+        neighborhood_mask = neighborhoods >= 0
+        unique_indices = np.unique(neighborhoods[neighborhood_mask])
+        if not len(unique_indices):
+            raise ValueError("Stage1 batch contains no valid neighborhood nodes")
+        local_neighborhoods = np.zeros_like(neighborhoods)
+        local_neighborhoods[neighborhood_mask] = np.searchsorted(
+            unique_indices, neighborhoods[neighborhood_mask],
+        )
+        return {
+            "features": torch.from_numpy(self.features[unique_indices]),
+            "period_id": torch.from_numpy(self.period_ids[target_indices]),
+            "neighborhood_indices": torch.from_numpy(local_neighborhoods),
+            "neighborhood_mask": torch.from_numpy(neighborhood_mask),
+            "target": torch.from_numpy(self.targets[target_positions]),
+            "index": torch.from_numpy(target_positions),
+        }
+
+
 def normalized_adjacency(frame: pd.DataFrame, neighbors: pd.DataFrame, device: torch.device) -> torch.Tensor:
     sources, targets = masked_edges(frame, neighbors)
     if not len(sources):

@@ -14,6 +14,7 @@ from carbon_transfer.evaluation import (
     aggregate_single_month_multiseed_runs,
     aggregate_single_month_runs,
     aggregate_three_year_cross_region_runs,
+    aggregate_stage1_within_city_grid_runs,
 )
 from carbon_transfer.progress import RunProgress, run_is_complete
 from carbon_transfer.training import train_run
@@ -34,6 +35,8 @@ def _split_roots(config: Dict) -> List[Path]:
 
 
 def _protocol_for_experiment(experiment: str) -> str:
+    if experiment.startswith("stage1_within_city_grid"):
+        return "stage1_within_city_grid"
     if experiment.startswith("three_year_cross_region"):
         return "three_year_cross_region"
     if experiment.startswith("annual_cross_region"):
@@ -126,6 +129,8 @@ def aggregate_for_config(config: Dict, tasks: Iterable[ExperimentTask]) -> None:
     report_dir = _report_dir(config, protocol)
     if protocol == "three_year_cross_region":
         aggregate_three_year_cross_region_runs(artifact_dir, report_dir, len(task_list))
+    elif protocol == "stage1_within_city_grid":
+        aggregate_stage1_within_city_grid_runs(artifact_dir, report_dir, len(task_list))
     elif protocol == "annual_cross_region":
         aggregate_annual_cross_region_runs(artifact_dir, report_dir, len(task_list))
     elif protocol == "single_month":

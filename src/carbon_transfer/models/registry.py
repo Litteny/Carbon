@@ -28,6 +28,16 @@ _MODEL_SPECS: Dict[str, ModelSpec] = {
         "open_carbon",
         {"variant": "monthly", "poi_input_mode": "precomputed", "training_strategy": "erm"},
     ),
+    "opencarbon_stage1_b0": ModelSpec(
+        "opencarbon_stage1_b0",
+        "open_carbon_stage1",
+        {"variant": "stage1", "input_scope": "viirs", "poi_input_mode": "none"},
+    ),
+    "opencarbon_stage1_m1": ModelSpec(
+        "opencarbon_stage1_m1",
+        "open_carbon_stage1",
+        {"variant": "stage1", "input_scope": "viirs_modis_weather", "poi_input_mode": "none"},
+    ),
 }
 
 

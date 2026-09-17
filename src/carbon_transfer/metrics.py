@@ -58,6 +58,30 @@ def calculate_metrics(predictions: pd.DataFrame) -> Tuple[pd.DataFrame, Dict]:
     return monthly, summary
 
 
+def calculate_pooled_metrics(predictions: pd.DataFrame) -> pd.DataFrame:
+    """Calculate one pooled metric row across all grid-month test samples."""
+    y_log = predictions["y_log"].to_numpy(dtype=float)
+    pred_log = predictions["pred_log"].to_numpy(dtype=float)
+    y_tc = predictions["y_tc"].to_numpy(dtype=float)
+    pred_tc = predictions["pred_tc"].to_numpy(dtype=float)
+    valid = np.isfinite(y_log) & np.isfinite(pred_log) & np.isfinite(y_tc) & np.isfinite(pred_tc)
+    y_log, pred_log = y_log[valid], pred_log[valid]
+    y_tc, pred_tc = y_tc[valid], pred_tc[valid]
+    log_r2 = r2_score(y_log, pred_log) if len(y_log) >= 2 and np.unique(y_log).size > 1 else np.nan
+    correlation = spearmanr(y_log, pred_log).statistic if len(y_log) >= 2 else np.nan
+    return pd.DataFrame([{
+        "scope": "pooled",
+        "n": int(len(y_log)),
+        "log_r2": log_r2,
+        "log_mae": mean_absolute_error(y_log, pred_log) if len(y_log) else np.nan,
+        "log_rmse": mean_squared_error(y_log, pred_log) ** 0.5 if len(y_log) else np.nan,
+        "log_spearman": correlation,
+        "tc_mae": mean_absolute_error(y_tc, pred_tc) if len(y_tc) else np.nan,
+        "tc_rmse": mean_squared_error(y_tc, pred_tc) ** 0.5 if len(y_tc) else np.nan,
+        "r2_status": "ok" if np.isfinite(log_r2) else "undefined_less_than_2_or_constant",
+    }])
+
+
 def calculate_yearly_metrics(monthly: pd.DataFrame) -> pd.DataFrame:
     """Summarize monthly metrics independently for each calendar year."""
     metric_columns = ["log_r2", "log_mae", "log_rmse", "log_spearman", "tc_mae", "tc_rmse"]

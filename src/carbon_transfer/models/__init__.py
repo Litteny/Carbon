@@ -5,6 +5,7 @@ from .opencarbon import (
     MeanMLPGatedNeighborhoodAggregator,
     NeighborhoodAggregator,
     OpenCarbonModel,
+    Stage1OpenCarbonModel,
     POIEncoder,
     SEModule,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "MeanMLPGatedNeighborhoodAggregator",
     "NeighborhoodAggregator",
     "OpenCarbonModel",
+    "Stage1OpenCarbonModel",
     "POIEncoder",
     "SEModule",
     "contrastive_loss",

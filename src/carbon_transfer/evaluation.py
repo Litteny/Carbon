@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Sequence
 
+import numpy as np
 import pandas as pd
 
-from .metrics import calculate_metrics
+from .metrics import calculate_metrics, calculate_pooled_metrics
 from .utils import write_json
 
 
@@ -26,6 +27,13 @@ def evaluate_run(run_dir: Path) -> Dict:
     predictions = pd.read_parquet(run_dir / "predictions.parquet")
     monthly, summary = calculate_metrics(predictions)
     monthly.to_csv(run_dir / "metrics_monthly.csv", index=False)
+    if (
+        not predictions.empty
+        and str(predictions["experiment"].iloc[0]).startswith("stage1_within_city_grid")
+    ):
+        calculate_pooled_metrics(predictions).to_csv(
+            run_dir / "metrics_pooled.csv", index=False,
+        )
     write_json(run_dir / "metrics_summary.json", summary)
     return summary
 
@@ -140,6 +148,168 @@ def aggregate_runs(
         if summary["environment_robustness"]:
             lines.extend(["", "## Source-environment robustness", ""])
             lines.append(_markdown_table(pd.DataFrame(summary["environment_robustness"])))
+    (report_dir / "stage1_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return summary
+
+
+def aggregate_stage1_within_city_grid_runs(
+    artifact_dir: Path, report_dir: Path, expected_runs: int = 0,
+) -> Dict:
+    """Aggregate B0/M1 paired results for the within-city grid protocol."""
+    metric_names = ["log_r2", "log_mae", "log_rmse", "log_spearman", "tc_mae", "tc_rmse"]
+    records = []
+    prediction_frames = []
+    for prediction_file in sorted(artifact_dir.rglob("predictions.parquet")):
+        predictions = pd.read_parquet(prediction_file)
+        if predictions.empty:
+            continue
+        experiment = str(predictions["experiment"].iloc[0])
+        if not experiment.startswith("stage1_within_city_grid"):
+            continue
+        metrics_file = prediction_file.parent / "metrics_monthly.csv"
+        if not metrics_file.exists():
+            continue
+        monthly = pd.read_csv(metrics_file)
+        identity = predictions.iloc[0][[
+            "experiment", "fold_id", "model", "seed", "city_id",
+        ]].to_dict()
+        record = dict(identity)
+        record.update({
+            "test_samples": int(len(predictions)),
+            "test_grids": int(predictions["cell_id"].nunique()),
+            "months": int(predictions["period"].nunique()),
+        })
+        if "neighborhood_aggregation" in predictions:
+            record["neighborhood_aggregation"] = str(
+                predictions["neighborhood_aggregation"].iloc[0],
+            )
+        for metric in metric_names:
+            record[f"{metric}_mean"] = monthly[metric].mean(skipna=True)
+            record[f"{metric}_std_months"] = monthly[metric].std(skipna=True, ddof=1)
+        pooled_file = prediction_file.parent / "metrics_pooled.csv"
+        if pooled_file.exists():
+            pooled = pd.read_csv(pooled_file).iloc[0]
+            for metric in metric_names:
+                record[f"{metric}_pooled"] = pooled[metric]
+        records.append(record)
+        prediction_frames.append(predictions)
+
+    results = pd.DataFrame(records)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    results.to_csv(report_dir / "stage1_runs.csv", index=False)
+
+    paired = pd.DataFrame()
+    if prediction_frames:
+        all_predictions = pd.concat(prediction_frames, ignore_index=True)
+        key = ["experiment", "fold_id", "city_id", "cell_id", "period", "seed"]
+        if "neighborhood_aggregation" in all_predictions:
+            key.append("neighborhood_aggregation")
+        base = all_predictions[all_predictions["model"] == "opencarbon_stage1_b0"].copy()
+        candidate = all_predictions[all_predictions["model"] == "opencarbon_stage1_m1"].copy()
+        base["b0_abs_log_error"] = (base["pred_log"] - base["y_log"]).abs()
+        candidate["m1_abs_log_error"] = (candidate["pred_log"] - candidate["y_log"]).abs()
+        paired = base[key + ["b0_abs_log_error"]].merge(
+            candidate[key + ["m1_abs_log_error"]], on=key, how="inner", validate="one_to_one",
+        )
+        paired["delta_log_mae"] = paired["m1_abs_log_error"] - paired["b0_abs_log_error"]
+        paired.to_csv(report_dir / "stage1_paired_samples.csv", index=False)
+        group_keys = ["experiment", "fold_id", "city_id", "seed"]
+        if "neighborhood_aggregation" in paired:
+            group_keys.append("neighborhood_aggregation")
+        paired_summary = paired.groupby(group_keys, sort=True).agg(
+            paired_samples=("delta_log_mae", "size"),
+            b0_log_mae=("b0_abs_log_error", "mean"),
+            m1_log_mae=("m1_abs_log_error", "mean"),
+            delta_log_mae=("delta_log_mae", "mean"),
+            m1_improved_fraction=("delta_log_mae", lambda values: float((values < 0).mean())),
+        ).reset_index()
+        grid_deltas = paired.groupby(group_keys + ["cell_id"], sort=True)[
+            "delta_log_mae"
+        ].mean().reset_index()
+        bootstrap = []
+        generator = np.random.default_rng(2026)
+        for group_identity, group in grid_deltas.groupby(group_keys, sort=True):
+            values = group["delta_log_mae"].to_numpy(dtype=float)
+            if len(values) < 2:
+                low = high = float(values[0]) if len(values) else np.nan
+            else:
+                indices = generator.integers(0, len(values), size=(1000, len(values)))
+                means = values[indices].mean(axis=1)
+                low, high = np.quantile(means, [0.025, 0.975]).tolist()
+            identity_values = (
+                group_identity if isinstance(group_identity, tuple) else (group_identity,)
+            )
+            identity = dict(zip(group_keys, identity_values))
+            identity.update({
+                "grid_count": int(len(values)),
+                "delta_log_mae_ci_low": float(low),
+                "delta_log_mae_ci_high": float(high),
+            })
+            bootstrap.append(identity)
+        paired_summary = paired_summary.merge(
+            pd.DataFrame(bootstrap), on=group_keys, how="left", validate="one_to_one",
+        )
+    else:
+        paired_summary = pd.DataFrame()
+        pd.DataFrame().to_csv(report_dir / "stage1_paired_samples.csv", index=False)
+    paired_summary.to_csv(report_dir / "stage1_paired_comparison.csv", index=False)
+
+    seed_summary = pd.DataFrame()
+    city_summary = pd.DataFrame()
+    city_grid_weighted = pd.DataFrame()
+    seed_city_macro = pd.DataFrame()
+    if not paired_summary.empty:
+        group_keys = ["city_id", "seed"]
+        if "neighborhood_aggregation" in paired_summary:
+            group_keys.append("neighborhood_aggregation")
+        seed_summary = paired_summary.groupby(group_keys, sort=True)[[
+            "b0_log_mae", "m1_log_mae", "delta_log_mae", "m1_improved_fraction",
+        ]].mean().reset_index()
+        city_keys = ["city_id"]
+        if "neighborhood_aggregation" in paired_summary:
+            city_keys.append("neighborhood_aggregation")
+        city_summary = seed_summary.groupby(city_keys, sort=True)[[
+            "b0_log_mae", "m1_log_mae", "delta_log_mae", "m1_improved_fraction",
+        ]].mean().reset_index()
+        weighted_rows = []
+        for identity, group in paired_summary.groupby(city_keys, sort=True):
+            weights = group["grid_count"].to_numpy(dtype=float)
+            row = dict(zip(city_keys, identity if isinstance(identity, tuple) else (identity,)))
+            for metric in ("b0_log_mae", "m1_log_mae", "delta_log_mae", "m1_improved_fraction"):
+                values = group[metric].to_numpy(dtype=float)
+                row[metric] = float(np.average(values, weights=weights))
+            weighted_rows.append(row)
+        city_grid_weighted = pd.DataFrame(weighted_rows)
+        macro_keys = ["seed"]
+        if "neighborhood_aggregation" in paired_summary:
+            macro_keys.append("neighborhood_aggregation")
+        seed_city_macro = seed_summary.groupby(macro_keys, sort=True)[[
+            "b0_log_mae", "m1_log_mae", "delta_log_mae", "m1_improved_fraction",
+        ]].mean().reset_index()
+    seed_summary.to_csv(report_dir / "stage1_seed_summary.csv", index=False)
+    city_summary.to_csv(report_dir / "stage1_city_summary.csv", index=False)
+    city_grid_weighted.to_csv(report_dir / "stage1_city_grid_weighted.csv", index=False)
+    seed_city_macro.to_csv(report_dir / "stage1_seed_city_macro.csv", index=False)
+    summary = {
+        "experiment": "stage1_within_city_grid_2021_2023",
+        "expected_runs": int(expected_runs),
+        "completed_runs": int(len(results)),
+        "primary_metric": "paired_log_mae_delta_m1_minus_b0",
+        "paired_samples": int(len(paired)),
+        "neighborhood_aggregations": sorted(
+            results["neighborhood_aggregation"].dropna().unique().tolist()
+        ) if "neighborhood_aggregation" in results else [],
+    }
+    write_json(report_dir / "stage1_summary.json", summary)
+    lines = [
+        "# Stage 1 within-city grid experiment", "",
+        f"Completed runs: **{len(results)} / {expected_runs}**", "",
+        "Primary metric: paired Log MAE delta (`M1 - B0`; negative means improvement).", "",
+    ]
+    if not results.empty:
+        lines.extend(["## Run metrics", "", _markdown_table(results), ""])
+    if not paired_summary.empty:
+        lines.extend(["## Paired comparison", "", _markdown_table(paired_summary), ""])
     (report_dir / "stage1_report.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     return summary
 

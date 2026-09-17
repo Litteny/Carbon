@@ -39,6 +39,11 @@ def load_script(name: str):
             "2021-2023_tokyo_split_seed_43",
             "tokyo",
         ),
+        (
+            "run_stage1_within_city_grid",
+            "2021-2023_tokyo_grid_fixed",
+            "tokyo",
+        ),
     ],
 )
 def test_experiment_scripts_map_folds_to_cities(script_name, fold, city):
@@ -56,6 +61,7 @@ def test_experiment_scripts_map_folds_to_cities(script_name, fold, city):
         "run_single_month_cross_region_multiseed",
         "run_annual_cross_region",
         "run_three_year_cross_region",
+        "run_stage1_within_city_grid",
     ],
 )
 def test_experiment_scripts_accept_common_training_overrides(script_name):

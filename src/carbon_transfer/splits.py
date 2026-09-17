@@ -12,6 +12,7 @@ from .config import project_path
 from .utils import sha256_file, write_json
 from .single_month import build_single_month_splits
 from .three_year_region import build_three_year_region_splits
+from .within_city_grid import build_within_city_grid_splits
 
 
 SPLIT_COLUMNS = ["city_id", "cell_id", "period", "admin_id", "admin_name", "split"]
@@ -95,6 +96,8 @@ def _write_manifest(frame: pd.DataFrame, path: Path, experiment: str, fold_id: s
 
 
 def build_splits(config: Dict) -> Dict:
+    if str(config.get("experiment", "")).startswith("stage1_within_city_grid"):
+        return build_within_city_grid_splits(config, _write_manifest)
     if str(config.get("experiment", "")).startswith("three_year_cross_region"):
         return build_three_year_region_splits(config, _write_manifest)
     if str(config.get("experiment", "")).startswith("annual_cross_region"):

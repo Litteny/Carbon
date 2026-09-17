@@ -204,3 +204,55 @@ class OpenCarbonModel(nn.Module):
             self.poi_encoder(poi), remote, environment,
             neighborhood_indices, neighborhood_mask,
         )
+
+
+class Stage1OpenCarbonModel(nn.Module):
+    """POI-free OpenCarbon variant for same-month within-city grid transfer."""
+
+    def __init__(
+        self,
+        feature_dim: int,
+        representation_dim: int = 128,
+        time_embedding_dim: int = 32,
+        num_periods: int = 36,
+        dropout: float = 0.2,
+        neighborhood_aggregation: str = "mean_mlp_gate",
+    ) -> None:
+        super().__init__()
+        self.feature_encoder = MLPEncoder(feature_dim, representation_dim, dropout)
+        self.time_embedding = nn.Embedding(num_periods, time_embedding_dim)
+        aggregators = {
+            "spatial_attention": NeighborhoodAggregator,
+            "mean_mlp_gate": MeanMLPGatedNeighborhoodAggregator,
+        }
+        if neighborhood_aggregation not in aggregators:
+            raise ValueError(
+                f"Unknown neighborhood_aggregation: {neighborhood_aggregation}; "
+                f"expected one of {sorted(aggregators)}"
+            )
+        self.neighborhood_aggregation = neighborhood_aggregation
+        self.neighborhood_aggregator = aggregators[neighborhood_aggregation](
+            representation_dim, dropout,
+        )
+        self.regressor = nn.Sequential(
+            nn.Linear(representation_dim * 2 + time_embedding_dim, representation_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(representation_dim, 1),
+        )
+
+    def forward(
+        self,
+        features: torch.Tensor,
+        period_ids: torch.Tensor,
+        neighborhood_indices: torch.Tensor,
+        neighborhood_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        grid_representation = self.feature_encoder(features)
+        center, neighborhood = self.neighborhood_aggregator(
+            grid_representation, neighborhood_indices, neighborhood_mask,
+        )
+        time_representation = self.time_embedding(period_ids)
+        return self.regressor(torch.cat([
+            center, neighborhood, time_representation,
+        ], dim=-1)).squeeze(-1)

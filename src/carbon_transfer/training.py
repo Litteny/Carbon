@@ -22,21 +22,23 @@ from torch.utils.data import DataLoader, TensorDataset
 from .config import project_path
 from .constants import (
     MISSING_COLUMNS, MODEL_NAMES, MODIS_COLUMNS, MONTH_COLUMNS, POI_COLUMNS,
+    STAGE1_B0_MODEL, STAGE1_FEATURE_COLUMNS, STAGE1_MODEL_NAMES, STAGE1_M1_MODEL,
     TABULAR_FEATURES, VIIRS_COLUMNS, WEATHER_COLUMNS,
 )
 from .datasets import (
     BalancedEnvironmentBatchSampler,
     OpenCarbonDataset,
     PrecomputedOpenCarbonDataset,
+    Stage1OpenCarbonDataset,
     TabularOpenCarbonDataset,
     fixed_neighborhood_indices,
     normalized_adjacency,
 )
 from .metrics import (
     calculate_admin_metrics, calculate_annual_admin_metrics, calculate_metrics,
-    calculate_yearly_metrics, prediction_frame,
+    calculate_pooled_metrics, calculate_yearly_metrics, prediction_frame,
 )
-from .models import BPNN, CarbonGCN, OpenCarbonModel, contrastive_loss
+from .models import BPNN, CarbonGCN, OpenCarbonModel, Stage1OpenCarbonModel, contrastive_loss
 from .poi_embeddings import (
     POIEmbeddingStore,
     expected_metadata as expected_poi_embedding_metadata,
@@ -100,6 +102,57 @@ def _load_fold(config: Dict, fold_id: str) -> Tuple[Dict[str, pd.DataFrame], Pat
             limited[name] = candidate.drop(columns="_smoke_rank").reset_index(drop=True)
         frames = limited
     return frames, manifest_path, experiment
+
+
+def _load_stage1_fold(
+    config: Dict, fold_id: str,
+) -> Tuple[Dict[str, pd.DataFrame], pd.DataFrame, Path, str]:
+    """Load a stage-1 fold plus the complete label-free context frame."""
+    panel_path = project_path(config["panel_file"])
+    manifest_path, experiment = _resolve_manifest(project_path(config["split_dir"]), fold_id)
+    panel = pd.read_parquet(panel_path)
+    panel["period"] = panel["period"].astype(str)
+    manifest = pd.read_parquet(manifest_path, columns=["city_id", "cell_id", "period", "split"])
+    manifest["period"] = manifest["period"].astype(str)
+    joined = manifest.merge(
+        panel, on=["city_id", "cell_id", "period"], how="left", validate="one_to_one",
+    )
+    if joined["log1p_emission"].isna().any():
+        raise ValueError("Stage1 split manifest contains keys absent from the panel")
+    frames = {
+        name: group.drop(columns="split").reset_index(drop=True)
+        for name, group in joined.groupby("split", sort=False)
+    }
+    if set(frames) != {"train", "validation", "test"}:
+        raise ValueError(f"Fold {fold_id} does not contain train/validation/test")
+    full_frame = joined.drop(columns="split").sort_values(
+        ["city_id", "period", "cell_id"],
+    ).reset_index(drop=True)
+    if full_frame["city_id"].astype(str).nunique() != 1:
+        raise ValueError("Stage1 within-city fold must contain exactly one city")
+    return frames, full_frame, manifest_path, experiment
+
+
+def _period_ids(periods: pd.Series) -> np.ndarray:
+    values = periods.astype(str)
+    parsed = values.str[:4].astype(int) * 12 + values.str[4:6].astype(int) - (2021 * 12 + 1)
+    result = parsed.to_numpy(dtype=np.int64)
+    if np.any(result < 0) or np.any(result >= 36):
+        raise ValueError("Stage1 period IDs must cover 2021-01 through 2023-12")
+    return result
+
+
+def _stage1_feature_mask(model_name: str) -> np.ndarray:
+    if model_name not in STAGE1_MODEL_NAMES:
+        raise ValueError(f"Unknown stage1 model: {model_name}")
+    allowed = set(VIIRS_COLUMNS)
+    if model_name == STAGE1_M1_MODEL:
+        allowed.update(MODIS_COLUMNS)
+        allowed.update(WEATHER_COLUMNS)
+        allowed.update(
+            f"{name}_is_missing" for name in MODIS_COLUMNS + WEATHER_COLUMNS
+        )
+    return np.asarray([column in allowed for column in STAGE1_FEATURE_COLUMNS], dtype=bool)
 
 
 def _pipeline(scale: bool = True) -> Pipeline:
@@ -487,11 +540,200 @@ def _open_carbon_poi_input_mode(
     ):
         return "precomputed"
     mode = str(settings.get("poi_input_mode", "dense"))
-    if mode not in {"dense", "precomputed", "tabular"}:
+    if mode not in {"dense", "precomputed", "tabular", "none"}:
         raise ValueError(
-            f"Unknown poi_input_mode={mode!r}; expected 'dense', 'precomputed', or 'tabular'"
+            f"Unknown poi_input_mode={mode!r}; expected 'dense', 'precomputed', 'tabular', or 'none'"
         )
     return mode
+
+
+def _train_stage1_open_carbon(
+    model_name: str,
+    fold_id: str,
+    frames: Dict[str, pd.DataFrame],
+    full_frame: pd.DataFrame,
+    neighbors: pd.DataFrame,
+    config: Dict,
+    settings: Dict,
+    device: torch.device,
+    run_dir: Path,
+    seed: int,
+) -> np.ndarray:
+    """Train the POI-free B0/M1 model with full-panel feature context."""
+    active_mask = _stage1_feature_mask(model_name)
+    preprocessor = _pipeline(scale=True)
+    preprocessor.fit(
+        frames["train"][list(STAGE1_FEATURE_COLUMNS)],
+    )
+    full_values = preprocessor.transform(
+        full_frame[list(STAGE1_FEATURE_COLUMNS)],
+    ).astype(np.float32)
+    full_values[:, ~active_mask] = 0.0
+    period_ids = _period_ids(full_frame["period"])
+    context_frame = full_frame[["city_id", "cell_id", "period"]].copy()
+    neighborhoods = fixed_neighborhood_indices(context_frame, neighbors)
+    joblib.dump({
+        "pipeline": preprocessor,
+        "feature_columns": list(STAGE1_FEATURE_COLUMNS),
+        "active_feature_columns": [
+            column for column, active in zip(STAGE1_FEATURE_COLUMNS, active_mask) if active
+        ],
+        "context_scope": "full_city_same_period_open_features_no_labels",
+        "target_transform": "log1p_emission_tc",
+    }, run_dir / "preprocessor.joblib")
+
+    # The model receives a fixed-width feature vector for both B0 and M1;
+    # B0's disallowed feature positions are neutralized after train-fitted scaling.
+    datasets = {
+        name: Stage1OpenCarbonDataset(
+            frames[name], context_frame, full_values, period_ids, neighborhoods,
+        )
+        for name in ("train", "validation", "test")
+    }
+    num_workers = int(settings.get("num_workers", 0))
+    worker_options = {}
+    if num_workers > 0:
+        worker_options = {
+            "persistent_workers": bool(settings.get("persistent_workers", True)),
+            "prefetch_factor": int(settings.get("prefetch_factor", 2)),
+        }
+    loaders = {}
+    for name, dataset in datasets.items():
+        loaders[name] = DataLoader(
+            dataset,
+            batch_size=int(settings["batch_size"]),
+            shuffle=name == "train",
+            num_workers=num_workers,
+            pin_memory=device.type == "cuda",
+            collate_fn=dataset.collate,
+            **worker_options,
+        )
+
+    model = Stage1OpenCarbonModel(
+        len(STAGE1_FEATURE_COLUMNS),
+        int(settings["representation_dim"]),
+        int(settings.get("time_embedding_dim", 32)),
+        36,
+        float(settings["dropout"]),
+        str(settings.get("neighborhood_aggregation", "mean_mlp_gate")),
+    ).to(device)
+    neighborhood_aggregation = model.neighborhood_aggregation
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=float(settings["learning_rate"]),
+        weight_decay=float(settings["weight_decay"]),
+    )
+    amp_enabled = bool(settings.get("amp", True)) and device.type == "cuda"
+    scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
+    accumulation = int(settings.get("gradient_accumulation", 1))
+    best_loss, stale, start_epoch = float("inf"), 0, 0
+    latest_path = run_dir / "latest.pt"
+    log = []
+    events = []
+    checkpoint_fields = {
+        "stage1_model": model_name,
+        "neighborhood_aggregation": neighborhood_aggregation,
+        "active_feature_columns": [
+            column for column, active in zip(STAGE1_FEATURE_COLUMNS, active_mask) if active
+        ],
+        "time_embedding_dim": int(settings.get("time_embedding_dim", 32)),
+        "num_periods": 36,
+    }
+    if latest_path.exists():
+        checkpoint = torch.load(latest_path, map_location=device, weights_only=False)
+        if checkpoint.get("stage1_model") != model_name:
+            raise ValueError("Stage1 checkpoint model does not match the configured model")
+        _validate_neighborhood_aggregation(checkpoint, neighborhood_aggregation)
+        model.load_state_dict(checkpoint["model_state"])
+        optimizer.load_state_dict(checkpoint["optimizer_state"])
+        start_epoch = int(checkpoint["epoch"])
+        best_loss = float(checkpoint.get("best_loss", best_loss))
+        stale = int(checkpoint.get("stale", stale))
+        log = checkpoint.get("log", [])
+
+    def forward_batch(batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+        return model(
+            batch["features"], batch["period_id"],
+            batch["neighborhood_indices"], batch["neighborhood_mask"],
+        )
+
+    max_epochs = int(settings["max_epochs"])
+    with EpochProgress(fold_id, model_name, seed, start_epoch, max_epochs) as progress:
+        for epoch in range(start_epoch, max_epochs):
+            model.train()
+            optimizer.zero_grad(set_to_none=True)
+            train_losses = []
+            for step, batch in enumerate(loaders["train"]):
+                batch = {key: value.to(device, non_blocking=True) for key, value in batch.items()}
+                with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
+                    prediction = forward_batch(batch)
+                    loss = torch.mean(torch.abs(prediction - batch["target"]))
+                    scaled_loss = loss / accumulation
+                scaler.scale(scaled_loss).backward()
+                if (step + 1) % accumulation == 0 or step + 1 == len(loaders["train"]):
+                    scaler.step(optimizer)
+                    scaler.update()
+                    optimizer.zero_grad(set_to_none=True)
+                train_losses.append(float(loss.detach().cpu()))
+
+            model.eval()
+            validation_predictions = []
+            validation_targets = []
+            with torch.no_grad():
+                for batch in loaders["validation"]:
+                    batch = {key: value.to(device, non_blocking=True) for key, value in batch.items()}
+                    with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
+                        prediction = forward_batch(batch)
+                    validation_predictions.append(prediction.float().cpu())
+                    validation_targets.append(batch["target"].float().cpu())
+            validation_prediction = torch.cat(validation_predictions)
+            validation_target = torch.cat(validation_targets)
+            validation_loss = float(torch.mean(torch.abs(
+                validation_prediction - validation_target,
+            )).item())
+            entry = {
+                "epoch": epoch + 1,
+                "train_loss": float(np.mean(train_losses)),
+                "validation_mae": validation_loss,
+                "validation_r2": _validation_r2(validation_prediction, validation_target),
+            }
+            log.append(entry)
+            if validation_loss < best_loss - 1e-8:
+                best_loss, stale = validation_loss, 0
+                torch.save({
+                    "model_state": model.state_dict(),
+                    "epoch": epoch + 1,
+                    **checkpoint_fields,
+                }, run_dir / "best.pt")
+            else:
+                stale += 1
+            torch.save({
+                "model_state": model.state_dict(),
+                "optimizer_state": optimizer.state_dict(),
+                "epoch": epoch + 1,
+                "best_loss": best_loss,
+                "stale": stale,
+                "log": log,
+                **checkpoint_fields,
+            }, latest_path)
+            events.append(progress.update(entry, best_loss, stale))
+            write_training_log(run_dir / "training_log.json", events, log)
+            if stale >= int(settings["patience"]):
+                RunProgress().early_stop(fold_id, model_name, seed, epoch + 1, stale)
+                break
+
+    model.load_state_dict(torch.load(
+        run_dir / "best.pt", map_location=device, weights_only=True,
+    )["model_state"])
+    model.eval()
+    predictions = []
+    with torch.no_grad():
+        for batch in loaders["test"]:
+            batch = {key: value.to(device, non_blocking=True) for key, value in batch.items()}
+            with torch.amp.autocast(device_type=device.type, enabled=amp_enabled):
+                prediction = forward_batch(batch)
+            predictions.append(prediction.float().cpu().numpy())
+    return np.concatenate(predictions)
 
 
 def _train_open_carbon(
@@ -924,7 +1166,11 @@ def train_run(config: Dict, fold_id: str, model_name: str, seed: int = 42, force
     if model_name not in MODEL_NAMES:
         raise ValueError(f"Unknown model {model_name}; expected one of {MODEL_NAMES}")
     set_seed(seed)
-    frames, manifest_path, experiment = _load_fold(config, fold_id)
+    full_frame = None
+    if model_name in STAGE1_MODEL_NAMES:
+        frames, full_frame, manifest_path, experiment = _load_stage1_fold(config, fold_id)
+    else:
+        frames, manifest_path, experiment = _load_fold(config, fold_id)
     settings = config["training"]
 
     uses_precomputed_poi = (
@@ -958,6 +1204,15 @@ def train_run(config: Dict, fold_id: str, model_name: str, seed: int = 42, force
     }
     if model_name.startswith("opencarbon_"):
         metadata["input_ablation"] = str(settings.get("input_ablation", "baseline"))
+    if model_name in STAGE1_MODEL_NAMES:
+        metadata["stage1_protocol"] = {
+            "input_scope": "viirs" if model_name == STAGE1_B0_MODEL else "viirs_modis_weather",
+            "poi_input_mode": "none",
+            "time_encoding": "learned_period_embedding_36",
+            "context_scope": "full_city_same_period_open_features_no_labels",
+            "target_transform": "log1p_emission_tc",
+            "neighborhood_aggregation": str(settings.get("neighborhood_aggregation")),
+        }
     if uses_precomputed_poi:
         missing = [
             key for key in ("poi_embedding_dir", "poi_embedding_checkpoint_template")
@@ -1007,7 +1262,13 @@ def train_run(config: Dict, fold_id: str, model_name: str, seed: int = 42, force
         }
     write_json(run_dir / "run_metadata.json", metadata)
 
-    if model_name == "lightgbm":
+    if model_name in STAGE1_MODEL_NAMES:
+        assert full_frame is not None
+        predictions = _train_stage1_open_carbon(
+            model_name, fold_id, frames, full_frame, neighbors,
+            config, settings, device, run_dir, seed,
+        )
+    elif model_name == "lightgbm":
         predictions = _train_lightgbm(frames, run_dir, fold_id, model_name, seed)
     elif model_name == "bpnn":
         predictions = _train_bpnn(frames, settings, device, run_dir, fold_id, seed)
@@ -1020,9 +1281,15 @@ def train_run(config: Dict, fold_id: str, model_name: str, seed: int = 42, force
 
     context = {"experiment": experiment, "fold_id": fold_id, "model": model_name, "seed": int(seed)}
     output = prediction_frame(frames["test"], predictions, context)
+    output["split"] = "test"
+    output["target_scale"] = "log1p_emission_tc"
+    if model_name in STAGE1_MODEL_NAMES:
+        output["neighborhood_aggregation"] = str(settings.get("neighborhood_aggregation"))
     output.to_parquet(run_dir / "predictions.parquet", index=False)
     monthly, summary = calculate_metrics(output)
     monthly.to_csv(run_dir / "metrics_monthly.csv", index=False)
+    if model_name in STAGE1_MODEL_NAMES:
+        calculate_pooled_metrics(output).to_csv(run_dir / "metrics_pooled.csv", index=False)
     if experiment.startswith("single_month_cross_region"):
         calculate_admin_metrics(output).to_csv(run_dir / "metrics_by_admin.csv", index=False)
     if experiment.startswith("annual_cross_region"):

@@ -36,4 +36,16 @@ MODEL_NAMES = [
     "lightgbm", "bpnn", "carbongcn", "opencarbon_core",
     "opencarbon_monthly", "opencarbon_monthly_noviirs",
     "opencarbon_monthly_precomputed", "opencarbon_monthly_vrex",
+    "opencarbon_stage1_b0", "opencarbon_stage1_m1",
 ]
+
+STAGE1_B0_MODEL = "opencarbon_stage1_b0"
+STAGE1_M1_MODEL = "opencarbon_stage1_m1"
+STAGE1_MODEL_NAMES = [STAGE1_B0_MODEL, STAGE1_M1_MODEL]
+
+STAGE1_FEATURE_COLUMNS = (
+    VIIRS_COLUMNS
+    + MODIS_COLUMNS
+    + WEATHER_COLUMNS
+    + MISSING_COLUMNS
+)

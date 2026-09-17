@@ -13,6 +13,8 @@ OPEN_CARBON_MODELS = {
     "opencarbon_monthly_noviirs",
     "opencarbon_monthly_precomputed",
     "opencarbon_monthly_vrex",
+    "opencarbon_stage1_b0",
+    "opencarbon_stage1_m1",
 }
 
 
